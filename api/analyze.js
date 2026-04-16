@@ -26,7 +26,7 @@ module.exports = async function handler(req, res) {
 
   // Enforce token limit; lock model server-side
   const sanitizedBody = {
-    model: 'claude-sonnet-4-5-20251101',
+    model: 'claude-sonnet-4-6',
     max_tokens: Math.min(typeof body.max_tokens === 'number' ? body.max_tokens : 1000, 1000),
     messages: body.messages,
   };

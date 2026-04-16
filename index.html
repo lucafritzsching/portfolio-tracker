@@ -1100,10 +1100,12 @@ Struktur: 1) Kurze Lageeinschätzung 2) Ein Risikofaktor 3) Konkrete Handlungsem
         body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(`API ${res.status}: ${data.error || JSON.stringify(data)}`);
       const text = (data.content || []).map(c => c.text || '').join('');
       box.innerHTML = `<div style="color:var(--text-primary)">${text.replace(/\n/g,'<br>')}</div>`;
     } catch(e) {
-      box.innerHTML = '<span style="color:var(--text-secondary)">Fehler. Bitte erneut versuchen.</span>';
+      console.error('[analyzeStock]', e);
+      box.innerHTML = `<span style="color:var(--text-secondary)">Fehler: ${e.message}</span>`;
     }
   }
 
@@ -1114,29 +1116,34 @@ Struktur: 1) Kurze Lageeinschätzung 2) Ein Risikofaktor 3) Konkrete Handlungsem
     btn.disabled = true; btn.textContent = 'Analysiere…';
     box.innerHTML = '<div class="ai-label">Gesamtbewertung</div><div class="ai-text"><span class="loading-spinner"></span> Portfolio wird ausgewertet…</div>';
 
-    const { totalValue, totalCost, totalRet } = calcPortfolio();
-    const summary = portfolio.map(p => {
-      const w = (p.shares * p.currentPrice / totalValue * 100).toFixed(1);
-      const ret = ((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(1);
-      return `${p.ticker} (${p.sector}, ${w}% Gewicht, Rendite ${ret}%)`;
-    }).join('; ');
+    try {
+      const { totalValue, totalCost, totalRet } = calcPortfolio();
+      const retLabel = totalRet !== null ? `${totalRet.toFixed(2)}%` : 'k.A.';
+      const summary = portfolio.map(p => {
+        const w   = (p.shares * p.currentPrice / totalValue * 100).toFixed(1);
+        const ret = p.buyPrice != null
+          ? `${((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(1)}%`
+          : 'k.A.';
+        return `${p.ticker} (${p.sector}, ${w}% Gewicht, Rendite ${ret})`;
+      }).join('; ');
 
-    const prompt = `Du bist ein erfahrener Portfoliomanager. Analysiere folgendes Portfolio auf Deutsch (max. 160 Wörter, kein Haftungsausschluss, direkt und konkret):
-Gesamtrendite: ${totalRet.toFixed(2)}% | Positionen: ${summary}
+      const prompt = `Du bist ein erfahrener Portfoliomanager. Analysiere folgendes Portfolio auf Deutsch (max. 160 Wörter, kein Haftungsausschluss, direkt und konkret):
+Gesamtrendite: ${retLabel} | Positionen: ${summary}
 Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei konkrete Optimierungsmaßnahmen`;
 
-    try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(`API ${res.status}: ${data.error || JSON.stringify(data)}`);
       const text = (data.content || []).map(c => c.text || '').join('');
       box.innerHTML = `<div class="ai-label">Gesamtbewertung</div><div class="ai-text">${text.replace(/\n/g,'<br>')}</div>`;
       renderIndividualAnalysis();
     } catch(e) {
-      box.innerHTML = '<div class="ai-label">Gesamtbewertung</div><div class="ai-text" style="color:var(--text-secondary)">Fehler. Bitte erneut versuchen.</div>';
+      console.error('[runAIAnalysis]', e);
+      box.innerHTML = `<div class="ai-label">Gesamtbewertung</div><div class="ai-text" style="color:var(--text-secondary)">Fehler: ${e.message}</div>`;
     }
     btn.disabled = false; btn.textContent = 'Portfolio analysieren ↗';
   }
