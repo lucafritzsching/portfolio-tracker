@@ -227,6 +227,12 @@
     .btn-refresh { display: flex; align-items: center; gap: 6px; }
     .btn-refresh .loading-spinner { width: 12px; height: 12px; border-width: 1.5px; margin: 0; }
 
+    /* DEMO BADGE */
+    .demo-badge { display: flex; align-items: center; gap: 8px; }
+    .demo-label { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; background: var(--amber-light); color: var(--amber); letter-spacing: 0.3px; }
+    .demo-link  { font-size: 12px; color: var(--text-secondary); background: none; border: none; cursor: pointer; font-family: var(--font); padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+    .demo-link:hover { color: var(--text-primary); }
+
     /* SPARPLAN */
     .sparplan-card { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 12px; }
     .sparplan-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
@@ -251,7 +257,15 @@
         <button class="nav-btn" onclick="showView('analysis')">KI-Analyse</button>
       </nav>
     </div>
-    <button class="btn btn-primary" id="header-add-btn" onclick="openAddModal()">+ Position hinzufügen</button>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="demo-badge" id="demo-badge" style="display:none">
+        <span class="demo-label">Demo-Daten</span>
+        <button class="demo-link" onclick="resetDemo()">Zurücksetzen</button>
+        <span style="color:var(--border-med)">·</span>
+        <button class="demo-link" onclick="startOwnPortfolio()" style="color:var(--blue)">Eigenes Portfolio starten</button>
+      </div>
+      <button class="btn btn-primary" id="header-add-btn" onclick="openAddModal()">+ Position hinzufügen</button>
+    </div>
   </header>
 
   <!-- MAIN -->
@@ -1076,8 +1090,68 @@ Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei ko
     }).join('');
   }
 
+  // ─── Sample Data & Demo Mode ─────────────────────────────────────────
+  const SAMPLE_POSITIONS = [
+    { ticker: 'VOO',   name: 'Vanguard S&P 500 ETF',  shares: 5,  buyPrice: 400, sector: 'ETF / Fonds' },
+    { ticker: 'AAPL',  name: 'Apple Inc.',              shares: 10, buyPrice: 150, sector: 'Technologie' },
+    { ticker: 'GOOGL', name: 'Alphabet Inc.',           shares: 8,  buyPrice: 130, sector: 'Technologie' },
+    { ticker: 'META',  name: 'Meta Platforms Inc.',     shares: 6,  buyPrice: 280, sector: 'Technologie' },
+  ];
+
+  function isDemoMode() { return localStorage.getItem('portfaio-demo') === '1'; }
+
+  function updateDemoBadge() {
+    document.getElementById('demo-badge').style.display = isDemoMode() ? 'flex' : 'none';
+  }
+
+  async function loadSampleData() {
+    // Seed with buyPrice as placeholder so the UI renders immediately
+    portfolio = SAMPLE_POSITIONS.map(p => ({
+      ...p, currentPrice: p.buyPrice, dayChange: 0, alerts: { news: true }
+    }));
+    localStorage.setItem('portfaio-initialized', '1');
+    localStorage.setItem('portfaio-demo', '1');
+    save();
+    updateDemoBadge();
+    updateDashboard();
+
+    // Fetch live quotes in parallel, update silently
+    const results = await Promise.allSettled(SAMPLE_POSITIONS.map(p => fetchQuote(p.ticker)));
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        portfolio[i].currentPrice = r.value.currentPrice;
+        portfolio[i].dayChange    = r.value.dayChange;
+      }
+    });
+    save();
+    updateDashboard();
+  }
+
+  async function resetDemo() {
+    if (!confirm('Demo-Daten zurücksetzen? Das aktuelle Portfolio wird überschrieben.')) return;
+    sparpläne = [];
+    saveSparpläne();
+    await loadSampleData();
+  }
+
+  function startOwnPortfolio() {
+    if (!confirm('Demo-Daten löschen und mit leerem Portfolio starten?')) return;
+    portfolio  = [];
+    sparpläne  = [];
+    save();
+    saveSparpläne();
+    localStorage.removeItem('portfaio-demo');
+    updateDemoBadge();
+    updateDashboard();
+  }
+
   // ─── Init ─────────────────────────────────────────────────────────────
-  updateDashboard();
+  updateDemoBadge();
+  if (localStorage.getItem('portfaio-initialized') === null) {
+    loadSampleData();
+  } else {
+    updateDashboard();
+  }
 </script>
 </body>
 </html>
