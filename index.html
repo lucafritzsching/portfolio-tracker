@@ -209,6 +209,16 @@
     .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
     .chart-legend span { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); }
     .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    /* QUOTE STATUS */
+    .quote-status { font-size: 12px; margin-top: 6px; min-height: 18px; display: flex; align-items: center; gap: 5px; }
+    .quote-status.loading { color: var(--text-secondary); }
+    .quote-status.success { color: var(--green); }
+    .quote-status.error   { color: var(--red); }
+
+    /* REFRESH BUTTON SPINNER */
+    .btn-refresh { display: flex; align-items: center; gap: 6px; }
+    .btn-refresh .loading-spinner { width: 12px; height: 12px; border-width: 1.5px; margin: 0; }
   </style>
 </head>
 <body>
@@ -262,7 +272,10 @@
       <div class="section">
         <div class="section-header">
           <div class="section-title">Meine Positionen</div>
-          <button class="btn" onclick="openAddModal()">+ Hinzufügen</button>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-refresh" id="refresh-btn" onclick="refreshAllQuotes()">Kurse aktualisieren</button>
+            <button class="btn" onclick="openAddModal()">+ Hinzufügen</button>
+          </div>
         </div>
         <div class="card-flush">
           <table class="stock-table">
@@ -358,7 +371,8 @@
     <h3>Position hinzufügen</h3>
     <div class="form-row">
       <label class="form-label">Ticker-Symbol (z.B. AAPL, MSFT, SAP.DE)</label>
-      <input class="form-input" id="input-ticker" placeholder="z.B. AAPL" />
+      <input class="form-input" id="input-ticker" placeholder="z.B. AAPL" autocomplete="off" />
+      <div class="quote-status" id="quote-status"></div>
     </div>
     <div class="form-row">
       <label class="form-label">Unternehmensname</label>
@@ -408,11 +422,65 @@
   // ─── State ───────────────────────────────────────────────────────────
   let portfolio = JSON.parse(localStorage.getItem('portfaio-portfolio') || '[]');
   let allocChart = null, sectorChart = null;
+  let tickerDebounce = null;
 
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
 
   // ─── Persist ─────────────────────────────────────────────────────────
   function save() { localStorage.setItem('portfaio-portfolio', JSON.stringify(portfolio)); }
+
+  // ─── Quote API ───────────────────────────────────────────────────────
+  async function fetchQuote(symbol) {
+    const res = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Fehler beim Laden');
+    }
+    return res.json(); // { currentPrice, dayChange, previousClose }
+  }
+
+  // Auto-fill modal when ticker is typed
+  document.getElementById('input-ticker').addEventListener('input', function () {
+    clearTimeout(tickerDebounce);
+    const sym = this.value.trim().toUpperCase();
+    const status = document.getElementById('quote-status');
+    if (sym.length < 1) { status.textContent = ''; status.className = 'quote-status'; return; }
+    status.className = 'quote-status loading';
+    status.innerHTML = '<span class="loading-spinner"></span> Kurs wird geladen…';
+    tickerDebounce = setTimeout(async () => {
+      try {
+        const q = await fetchQuote(sym);
+        document.getElementById('input-current-price').value = q.currentPrice;
+        document.getElementById('input-day-change').value = q.dayChange.toFixed(2);
+        status.className = 'quote-status success';
+        status.textContent = `✓ Kurs geladen: €${fmt(q.currentPrice)} (${q.dayChange >= 0 ? '+' : ''}${q.dayChange.toFixed(2)}% heute)`;
+      } catch (e) {
+        status.className = 'quote-status error';
+        status.textContent = `✕ ${e.message}`;
+      }
+    }, 600);
+  });
+
+  // Refresh all portfolio quotes
+  async function refreshAllQuotes() {
+    if (portfolio.length === 0) return;
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> Wird aktualisiert…';
+    const results = await Promise.allSettled(
+      portfolio.map(p => fetchQuote(p.ticker))
+    );
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        portfolio[i].currentPrice = r.value.currentPrice;
+        portfolio[i].dayChange    = r.value.dayChange;
+      }
+    });
+    save();
+    updateDashboard();
+    btn.disabled = false;
+    btn.innerHTML = 'Kurse aktualisieren';
+  }
 
   // ─── Navigation ──────────────────────────────────────────────────────
   function showView(v) {
@@ -428,11 +496,15 @@
   // ─── Modal ───────────────────────────────────────────────────────────
   function openAddModal() { document.getElementById('add-modal').classList.add('open'); }
   function closeModal() {
+    clearTimeout(tickerDebounce);
     document.getElementById('add-modal').classList.remove('open');
     ['input-ticker','input-name','input-shares','input-buy-price','input-current-price','input-day-change'].forEach(id => {
       document.getElementById(id).value = '';
     });
     document.getElementById('input-sector').value = 'Technologie';
+    const status = document.getElementById('quote-status');
+    status.textContent = '';
+    status.className = 'quote-status';
   }
   document.getElementById('add-modal').addEventListener('click', function(e) {
     if (e.target === this) closeModal();
