@@ -231,6 +231,12 @@
     .demo-link  { font-size: 12px; color: var(--text-secondary); background: none; border: none; cursor: pointer; font-family: var(--font); padding: 0; text-decoration: underline; text-underline-offset: 2px; }
     .demo-link:hover { color: var(--text-primary); }
 
+    /* EDIT MODAL */
+    .edit-preview-box { font-size: 13px; background: var(--bg-secondary); border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 4px; min-height: 38px; display: flex; align-items: center; color: var(--text-secondary); }
+    textarea.form-input { resize: vertical; min-height: 64px; }
+    .tx-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid var(--border); gap: 8px; }
+    .tx-item:last-child { border-bottom: none; }
+
     /* SPARPLAN */
     .sparplan-card { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 12px; }
     .sparplan-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
@@ -592,6 +598,97 @@
 <!-- FAB -->
 <button class="fab" id="fab-add" onclick="openAddModal()" aria-label="Position hinzufügen">+</button>
 
+<!-- EDIT MODAL -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal" style="width:500px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+      <h3 style="margin:0" id="edit-modal-title">Position bearbeiten</h3>
+      <button class="btn" style="padding:4px 10px;font-size:12px;min-height:0" onclick="closeEditModal()">✕</button>
+    </div>
+    <!-- Tabs -->
+    <div class="toggle-group" style="margin-bottom:1.25rem">
+      <button type="button" class="toggle-btn active" id="edit-tab-buy"  onclick="setEditTab('buy')">Kaufen</button>
+      <button type="button" class="toggle-btn"        id="edit-tab-sell" onclick="setEditTab('sell')">Verkaufen</button>
+      <button type="button" class="toggle-btn"        id="edit-tab-edit" onclick="setEditTab('edit')">Position</button>
+    </div>
+
+    <!-- BUY TAB -->
+    <div id="edit-section-buy">
+      <div class="form-row">
+        <label class="form-label">Aktueller Kurs</label>
+        <div class="edit-preview-box" id="edit-buy-price-display">–</div>
+      </div>
+      <div class="form-row">
+        <label class="form-label" id="edit-buy-shares-label">Anzahl Aktien</label>
+        <div class="toggle-group">
+          <button type="button" class="toggle-btn active" id="edit-toggle-shares" onclick="setEditSharesMode('shares')">Stückzahl</button>
+          <button type="button" class="toggle-btn"        id="edit-toggle-amount" onclick="setEditSharesMode('amount')">Betrag (€)</button>
+        </div>
+        <input class="form-input" id="edit-buy-qty" type="number" placeholder="z.B. 5" min="0.001" step="0.001" />
+        <div class="shares-hint" id="edit-buy-hint"></div>
+      </div>
+      <div class="edit-preview-box" id="edit-buy-preview">Vorschau: –</div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeEditModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="executeBuy()">Kauf ausführen</button>
+      </div>
+    </div>
+
+    <!-- SELL TAB -->
+    <div id="edit-section-sell" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Aktueller Kurs</label>
+        <div class="edit-preview-box" id="edit-sell-price-display">–</div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Anzahl zu verkaufen</label>
+        <input class="form-input" id="edit-sell-qty" type="number" placeholder="z.B. 3" min="0.001" step="0.001" />
+        <div class="shares-hint" id="edit-sell-max"></div>
+      </div>
+      <div class="edit-preview-box" id="edit-sell-preview">Vorschau: –</div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeEditModal()">Abbrechen</button>
+        <button class="btn btn-danger" onclick="executeSell()">Verkauf ausführen</button>
+      </div>
+    </div>
+
+    <!-- EDIT TAB -->
+    <div id="edit-section-edit" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Sektor</label>
+        <select class="form-input" id="edit-sector">
+          <option value="Technologie">Technologie</option>
+          <option value="Finanzen">Finanzen</option>
+          <option value="Gesundheit">Gesundheit</option>
+          <option value="Energie">Energie</option>
+          <option value="Konsum">Konsum</option>
+          <option value="Industrie">Industrie</option>
+          <option value="ETF / Fonds">ETF / Fonds</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Notiz <span style="font-weight:400;color:var(--text-tertiary)">– optional</span></label>
+        <textarea class="form-input" id="edit-note" placeholder="z.B. Kernposition, langfristig halten…"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Ø Kaufpreis manuell überschreiben (€) <span style="font-weight:400;color:var(--text-tertiary)">– leer = aus Transaktionen</span></label>
+        <input class="form-input" id="edit-manual-buy-price" type="number" placeholder="z.B. 150.00" step="0.01" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeEditModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="savePositionEdit()">Speichern</button>
+      </div>
+    </div>
+
+    <!-- TRANSACTION HISTORY -->
+    <details style="margin-top:12px;font-size:12px" id="edit-history-details">
+      <summary style="cursor:pointer;color:var(--text-secondary);user-select:none">Transaktionsverlauf</summary>
+      <div id="edit-history-list" style="margin-top:8px"></div>
+    </details>
+  </div>
+</div>
+
 <!-- SPARPLAN MODAL -->
 <div class="modal-overlay" id="sparplan-modal">
   <div class="modal">
@@ -619,18 +716,25 @@
 
 <script>
   // ─── State ───────────────────────────────────────────────────────────
-  let portfolio   = JSON.parse(localStorage.getItem('portfaio-portfolio')   || '[]');
-  let sparpläne   = JSON.parse(localStorage.getItem('portfaio-sparpläne')   || '[]');
+  let portfolio      = JSON.parse(localStorage.getItem('portfaio-portfolio')      || '[]');
+  let sparpläne      = JSON.parse(localStorage.getItem('portfaio-sparpläne')      || '[]');
+  let transaktionen  = JSON.parse(localStorage.getItem('portfaio-transaktionen')  || '[]');
   let allocChart = null, sectorChart = null;
   let tickerDebounce = null;
   let pendingQuote = null;   // holds { currentPrice, dayChange } fetched from /api/quote
   let sharesMode = 'shares'; // 'shares' | 'amount'
+  // Edit modal state
+  let editIdx = -1;
+  let editTab = 'buy';
+  let editPendingQuote = null;
+  let editSharesMode = 'shares';
 
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
 
   // ─── Persist ─────────────────────────────────────────────────────────
-  function save()           { localStorage.setItem('portfaio-portfolio', JSON.stringify(portfolio)); }
-  function saveSparpläne()  { localStorage.setItem('portfaio-sparpläne', JSON.stringify(sparpläne)); }
+  function save()              { localStorage.setItem('portfaio-portfolio',     JSON.stringify(portfolio)); }
+  function saveSparpläne()     { localStorage.setItem('portfaio-sparpläne',     JSON.stringify(sparpläne)); }
+  function saveTransaktionen() { localStorage.setItem('portfaio-transaktionen', JSON.stringify(transaktionen)); }
 
   // ─── Date helpers ────────────────────────────────────────────────────
   function getNextExecution(day) {
@@ -644,6 +748,39 @@
   }
   function daysUntil(d) {
     return Math.round((d - new Date().setHours(0,0,0,0)) / 86400000);
+  }
+
+  // ─── Transaction Helpers ─────────────────────────────────────────────
+  function calcAvgBuyPrice(ticker) {
+    const buys = transaktionen.filter(t => t.ticker === ticker && t.type === 'buy');
+    if (buys.length === 0) return null;
+    const totalCost   = buys.reduce((s, t) => s + t.shares * t.price, 0);
+    const totalShares = buys.reduce((s, t) => s + t.shares, 0);
+    return totalShares > 0 ? totalCost / totalShares : null;
+  }
+
+  function effectiveBuyPrice(p) {
+    if (p.manualBuyPrice != null) return p.manualBuyPrice;
+    const avg = calcAvgBuyPrice(p.ticker);
+    if (avg != null) return avg;
+    return p.buyPrice;
+  }
+
+  function buildTxHistoryHTML(ticker) {
+    const txs = transaktionen.filter(t => t.ticker === ticker);
+    if (txs.length === 0) return '<span style="color:var(--text-tertiary)">Noch keine Transaktionen erfasst.</span>';
+    return txs.slice().reverse().map(t => {
+      const isB = t.type === 'buy';
+      const pnlStr = !isB && t.realizedPnl != null
+        ? ` · G/V: <span class="${t.realizedPnl >= 0 ? 'green' : 'red'}">${t.realizedPnl >= 0 ? '+' : ''}€${fmt(Math.abs(t.realizedPnl))}</span>`
+        : '';
+      return `<div class="tx-item">
+        <span style="color:${isB ? 'var(--green)' : 'var(--red)'};font-weight:500">${isB ? '↑ Kauf' : '↓ Verkauf'}</span>
+        <span>${t.shares} Stück</span>
+        <span>@ €${fmt(t.price)}</span>
+        <span style="color:var(--text-secondary)">${t.date}${pnlStr}</span>
+      </div>`;
+    }).join('');
   }
 
   // ─── Quote API ───────────────────────────────────────────────────────
@@ -808,6 +945,14 @@
       dayChange: pendingQuote.dayChange,
       sector, alerts: { news: true }
     });
+    if (buyPrice != null) {
+      transaktionen.push({
+        id: Date.now(), ticker, type: 'buy',
+        shares, price: buyPrice,
+        date: new Date().toISOString().slice(0, 10),
+      });
+      saveTransaktionen();
+    }
     save();
     closeModal();
     updateDashboard();
@@ -822,20 +967,213 @@
     }
   }
 
+  // ─── Edit Modal ──────────────────────────────────────────────────────
+  function openEditModal(i) {
+    editIdx = i;
+    editTab = 'buy';
+    editPendingQuote = null;
+    editSharesMode = 'shares';
+    const p = portfolio[i];
+
+    document.getElementById('edit-modal-title').textContent = p.ticker + ' bearbeiten';
+    setEditTab('buy');
+    setEditSharesMode('shares');
+
+    // Populate position tab
+    document.getElementById('edit-sector').value = p.sector || 'Sonstiges';
+    document.getElementById('edit-note').value = p.note || '';
+    document.getElementById('edit-manual-buy-price').value = p.manualBuyPrice != null ? p.manualBuyPrice : '';
+
+    // Clear qty inputs
+    document.getElementById('edit-buy-qty').value = '';
+    document.getElementById('edit-sell-qty').value = '';
+    document.getElementById('edit-buy-hint').textContent = '';
+    document.getElementById('edit-sell-max').textContent = 'Max: ' + p.shares + ' Stück';
+
+    // Auto-fetch quote, fall back to cached price on error
+    const d1 = document.getElementById('edit-buy-price-display');
+    const d2 = document.getElementById('edit-sell-price-display');
+    d1.innerHTML = '<span class="loading-spinner"></span> Kurs wird geladen…';
+    d2.innerHTML = '<span class="loading-spinner"></span> Kurs wird geladen…';
+    fetchQuote(p.ticker).then(q => {
+      editPendingQuote = q;
+      const txt = '€' + fmt(q.currentPrice) + ' (' + (q.dayChange >= 0 ? '+' : '') + q.dayChange.toFixed(2) + '% heute)';
+      d1.textContent = txt;
+      d2.textContent = txt;
+      updateEditSharesHint();
+      updateEditBuyPreview();
+      updateEditSellPreview();
+    }).catch(() => {
+      editPendingQuote = { currentPrice: p.currentPrice, dayChange: p.dayChange };
+      const txt = '€' + fmt(p.currentPrice) + ' (gecachter Kurs)';
+      d1.textContent = txt;
+      d2.textContent = txt;
+    });
+
+    renderEditHistory(p.ticker);
+    document.getElementById('edit-modal').classList.add('open');
+  }
+
+  function closeEditModal() {
+    document.getElementById('edit-modal').classList.remove('open');
+    editIdx = -1;
+    editPendingQuote = null;
+  }
+
+  function setEditTab(tab) {
+    editTab = tab;
+    ['buy','sell','edit'].forEach(t => {
+      document.getElementById('edit-tab-' + t).classList.toggle('active', t === tab);
+      document.getElementById('edit-section-' + t).style.display = t === tab ? '' : 'none';
+    });
+  }
+
+  function setEditSharesMode(mode) {
+    editSharesMode = mode;
+    document.getElementById('edit-toggle-shares').classList.toggle('active', mode === 'shares');
+    document.getElementById('edit-toggle-amount').classList.toggle('active', mode === 'amount');
+    const input = document.getElementById('edit-buy-qty');
+    if (mode === 'shares') {
+      document.getElementById('edit-buy-shares-label').textContent = 'Anzahl Aktien';
+      input.placeholder = 'z.B. 5';
+    } else {
+      document.getElementById('edit-buy-shares-label').textContent = 'Investitionsbetrag (€)';
+      input.placeholder = 'z.B. 500.00';
+    }
+    input.value = '';
+    document.getElementById('edit-buy-hint').textContent = '';
+    updateEditBuyPreview();
+  }
+
+  function getEditShares() {
+    const raw = parseFloat(document.getElementById('edit-buy-qty').value);
+    if (!raw || raw <= 0 || !editPendingQuote) return null;
+    return editSharesMode === 'amount'
+      ? parseFloat((raw / editPendingQuote.currentPrice).toFixed(6))
+      : raw;
+  }
+
+  function updateEditSharesHint() {
+    if (editSharesMode !== 'amount') return;
+    const hint = document.getElementById('edit-buy-hint');
+    const raw = parseFloat(document.getElementById('edit-buy-qty').value);
+    if (!editPendingQuote) { hint.textContent = 'Kurs wird geladen…'; return; }
+    if (!raw || raw <= 0) { hint.textContent = ''; return; }
+    const computed = raw / editPendingQuote.currentPrice;
+    hint.textContent = '≈ ' + computed.toFixed(4).replace(/\.?0+$/, '') + ' Stück';
+  }
+
+  function updateEditBuyPreview() {
+    const box = document.getElementById('edit-buy-preview');
+    const shares = getEditShares();
+    if (!shares || !editPendingQuote) { box.textContent = 'Vorschau: –'; return; }
+    const cost = shares * editPendingQuote.currentPrice;
+    box.textContent = 'Vorschau: ' + shares + ' Stück × €' + fmt(editPendingQuote.currentPrice) + ' = €' + fmt(cost);
+  }
+
+  function updateEditSellPreview() {
+    const box = document.getElementById('edit-sell-preview');
+    if (!editPendingQuote || editIdx < 0) { box.textContent = 'Vorschau: –'; return; }
+    const qty = parseFloat(document.getElementById('edit-sell-qty').value);
+    if (!qty || qty <= 0) { box.textContent = 'Vorschau: –'; return; }
+    const p = portfolio[editIdx];
+    const proceeds = qty * editPendingQuote.currentPrice;
+    const bp = effectiveBuyPrice(p);
+    const pnl = bp != null ? (editPendingQuote.currentPrice - bp) * qty : null;
+    const pnlStr = pnl != null ? ' | G/V: ' + (pnl >= 0 ? '+' : '') + '€' + fmt(Math.abs(pnl)) : '';
+    box.textContent = 'Vorschau: ' + qty + ' Stück → €' + fmt(proceeds) + pnlStr;
+  }
+
+  function renderEditHistory(ticker) {
+    document.getElementById('edit-history-list').innerHTML = buildTxHistoryHTML(ticker);
+    const count = transaktionen.filter(t => t.ticker === ticker).length;
+    document.querySelector('#edit-history-details summary').textContent =
+      'Transaktionsverlauf (' + count + ' Einträge)';
+  }
+
+  function executeBuy() {
+    const shares = getEditShares();
+    if (!shares || shares <= 0) { alert('Bitte eine gültige Anzahl oder Betrag eingeben.'); return; }
+    if (!editPendingQuote) { alert('Kurs wird noch geladen.'); return; }
+    const p = portfolio[editIdx];
+    p.shares = parseFloat((p.shares + shares).toFixed(6));
+    p.currentPrice = editPendingQuote.currentPrice;
+    p.dayChange    = editPendingQuote.dayChange;
+    transaktionen.push({
+      id: Date.now(), ticker: p.ticker, type: 'buy',
+      shares, price: editPendingQuote.currentPrice,
+      date: new Date().toISOString().slice(0, 10),
+    });
+    if (p.manualBuyPrice == null) {
+      const avg = calcAvgBuyPrice(p.ticker);
+      if (avg != null) p.buyPrice = parseFloat(avg.toFixed(4));
+    }
+    save(); saveTransaktionen();
+    closeEditModal(); updateDashboard(); renderStockCards();
+  }
+
+  function executeSell() {
+    const qty = parseFloat(document.getElementById('edit-sell-qty').value);
+    if (!qty || qty <= 0) { alert('Bitte eine gültige Stückzahl eingeben.'); return; }
+    if (!editPendingQuote) { alert('Kurs wird noch geladen.'); return; }
+    const p = portfolio[editIdx];
+    if (qty > p.shares + 0.000001) { alert('Du hast nur ' + p.shares + ' Stück. Bitte weniger eingeben.'); return; }
+    const bp = effectiveBuyPrice(p);
+    const realizedPnl = bp != null ? (editPendingQuote.currentPrice - bp) * qty : null;
+    transaktionen.push({
+      id: Date.now(), ticker: p.ticker, type: 'sell',
+      shares: qty, price: editPendingQuote.currentPrice,
+      date: new Date().toISOString().slice(0, 10),
+      realizedPnl,
+    });
+    p.shares = parseFloat((p.shares - qty).toFixed(6));
+    p.currentPrice = editPendingQuote.currentPrice;
+    p.dayChange    = editPendingQuote.dayChange;
+    if (p.shares <= 0.000001) {
+      portfolio.splice(editIdx, 1);
+      save(); saveTransaktionen();
+      closeEditModal(); updateDashboard(); renderStockCards();
+      return;
+    }
+    save(); saveTransaktionen();
+    closeEditModal(); updateDashboard(); renderStockCards();
+  }
+
+  function savePositionEdit() {
+    const p = portfolio[editIdx];
+    p.sector = document.getElementById('edit-sector').value;
+    p.note   = document.getElementById('edit-note').value.trim();
+    const rawPrice = document.getElementById('edit-manual-buy-price').value.trim();
+    p.manualBuyPrice = rawPrice !== '' ? parseFloat(rawPrice) : null;
+    const eff = effectiveBuyPrice(p);
+    if (eff != null) p.buyPrice = eff;
+    save();
+    closeEditModal(); updateDashboard(); renderStockCards();
+  }
+
+  document.getElementById('edit-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditModal();
+  });
+  document.getElementById('edit-buy-qty').addEventListener('input', function() {
+    updateEditSharesHint(); updateEditBuyPreview();
+  });
+  document.getElementById('edit-sell-qty').addEventListener('input', updateEditSellPreview);
+
   // ─── Calculations ────────────────────────────────────────────────────
   function calcPortfolio() {
     const totalValue = portfolio.reduce((s, p) => s + p.shares * p.currentPrice, 0);
-    const totalCost  = portfolio.reduce((s, p) => p.buyPrice != null ? s + p.shares * p.buyPrice : s, 0);
+    const totalCost  = portfolio.reduce((s, p) => { const bp = effectiveBuyPrice(p); return bp != null ? s + p.shares * bp : s; }, 0);
     const dayPnl     = portfolio.reduce((s, p) => s + p.shares * p.currentPrice * (p.dayChange / 100), 0);
     const totalPnl   = totalValue - totalCost;
-    const hasCost    = portfolio.some(p => p.buyPrice != null);
+    const hasCost    = portfolio.some(p => effectiveBuyPrice(p) != null);
     const totalRet   = hasCost && totalCost > 0 ? (totalPnl / totalCost * 100) : null;
     return { totalValue, totalCost, dayPnl, totalPnl, totalRet, hasCost };
   }
 
   function getSignal(p) {
-    if (p.buyPrice != null) {
-      const pct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+    const bp = effectiveBuyPrice(p);
+    if (bp != null) {
+      const pct = (p.currentPrice - bp) / bp * 100;
       if (pct > 20)  return { label: 'Verkaufen',  cls: 'badge-sell' };
       if (pct < -12) return { label: 'Nachkaufen', cls: 'badge-buy' };
     }
@@ -885,10 +1223,11 @@
     tbody.innerHTML = portfolio.map((p, i) => {
       const value = p.shares * p.currentPrice;
       const sig = getSignal(p);
-      const pnlCell = p.buyPrice != null
+      const bp = effectiveBuyPrice(p);
+      const pnlCell = bp != null
         ? (() => {
-            const pnl    = (p.currentPrice - p.buyPrice) * p.shares;
-            const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+            const pnl    = (p.currentPrice - bp) * p.shares;
+            const pnlPct = (p.currentPrice - bp) / bp * 100;
             return `<td class="${pnl >= 0 ? 'green' : 'red'}">${pnl >= 0 ? '+' : ''}€${fmt(pnl)}<br><span style="font-size:11px">${fmtPct(pnlPct)}</span></td>`;
           })()
         : `<td style="color:var(--text-tertiary)">–</td>`;
@@ -1030,20 +1369,26 @@
     }
     container.innerHTML = portfolio.map((p, i) => {
       const value  = p.shares * p.currentPrice;
-      const sig = getSignal(p);
-      const hasBuy = p.buyPrice != null;
-      const pnl    = hasBuy ? (p.currentPrice - p.buyPrice) * p.shares : null;
-      const pnlPct = hasBuy ? (p.currentPrice - p.buyPrice) / p.buyPrice * 100 : null;
+      const sig    = getSignal(p);
+      const bp     = effectiveBuyPrice(p);
+      const hasBuy = bp != null;
+      const pnl    = hasBuy ? (p.currentPrice - bp) * p.shares : null;
+      const pnlPct = hasBuy ? (p.currentPrice - bp) / bp * 100 : null;
+      const txCount = transaktionen.filter(t => t.ticker === p.ticker).length;
+      const noteHtml = p.note
+        ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:6px;font-style:italic">${p.note}</div>`
+        : '';
       return `<div class="card" style="margin-bottom: 12px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
           <div>
             <div style="font-size:16px;font-weight:500">${p.ticker}</div>
             <div style="font-size:13px;color:var(--text-secondary)">${p.name} · <span class="badge badge-blue" style="font-size:11px">${p.sector}</span></div>
+            ${noteHtml}
           </div>
           <span class="badge ${sig.cls}">${sig.label}</span>
         </div>
         <div class="stock-detail-grid">
-          <div class="detail-item"><div class="detail-label">Kaufpreis</div><div class="detail-val">${hasBuy ? '€' + fmt(p.buyPrice) : '<span style="color:var(--text-tertiary)">–</span>'}</div></div>
+          <div class="detail-item"><div class="detail-label">Ø Kaufpreis</div><div class="detail-val">${hasBuy ? '€' + fmt(bp) : '<span style="color:var(--text-tertiary)">–</span>'}</div></div>
           <div class="detail-item"><div class="detail-label">Aktueller Kurs</div><div class="detail-val">€${fmt(p.currentPrice)}</div></div>
           <div class="detail-item"><div class="detail-label">Anzahl Stücke</div><div class="detail-val">${p.shares}</div></div>
           <div class="detail-item"><div class="detail-label">Gesamtwert</div><div class="detail-val">€${fmt(value)}</div></div>
@@ -1052,9 +1397,11 @@
           <div class="detail-item"><div class="detail-label">Heute</div><div class="detail-val ${p.dayChange >= 0 ? 'green' : 'red'}">${fmtPct(p.dayChange)}</div></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:0.5px solid var(--border)">
+          <button class="btn" style="font-size:12px;padding:4px 12px" onclick="openEditModal(${i})">Bearbeiten</button>
           <button class="analyze-btn" onclick="quickAnalyze(${i});showView('analysis')">KI-Analyse ↗</button>
-          <button class="btn btn-danger" onclick="removePosition(${i})" style="font-size:12px;padding:4px 10px;">Position entfernen</button>
+          <button class="btn btn-danger" onclick="removePosition(${i})" style="font-size:12px;padding:4px 10px;margin-left:auto">Entfernen</button>
         </div>
+        ${txCount > 0 ? `<details style="margin-top:8px;font-size:12px"><summary style="cursor:pointer;color:var(--text-secondary);user-select:none">${txCount} Transaktionen</summary><div style="margin-top:6px">${buildTxHistoryHTML(p.ticker)}</div></details>` : ''}
       </div>`;
     }).join('');
   }
@@ -1276,9 +1623,14 @@ Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei ko
     portfolio = SAMPLE_POSITIONS.map(p => ({
       ...p, currentPrice: p.buyPrice, dayChange: 0, alerts: { news: true }
     }));
+    transaktionen = SAMPLE_POSITIONS.map((p, idx) => ({
+      id: idx + 1, ticker: p.ticker, type: 'buy',
+      shares: p.shares, price: p.buyPrice,
+      date: '2024-01-15',
+    }));
     localStorage.setItem('portfaio-initialized', '1');
     localStorage.setItem('portfaio-demo', '1');
-    save();
+    save(); saveTransaktionen();
     updateDemoBadge();
     updateDashboard();
 
@@ -1296,17 +1648,18 @@ Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei ko
 
   async function resetDemo() {
     if (!confirm('Demo-Daten zurücksetzen? Das aktuelle Portfolio wird überschrieben.')) return;
-    sparpläne = [];
-    saveSparpläne();
+    sparpläne     = [];
+    transaktionen = [];
+    saveSparpläne(); saveTransaktionen();
     await loadSampleData();
   }
 
   function startOwnPortfolio() {
     if (!confirm('Demo-Daten löschen und mit leerem Portfolio starten?')) return;
-    portfolio  = [];
-    sparpläne  = [];
-    save();
-    saveSparpläne();
+    portfolio     = [];
+    sparpläne     = [];
+    transaktionen = [];
+    save(); saveSparpläne(); saveTransaktionen();
     localStorage.removeItem('portfaio-demo');
     updateDemoBadge();
     updateDashboard();
