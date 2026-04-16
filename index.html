@@ -115,7 +115,6 @@
 
     /* METRIC CARDS */
     .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
-    @media (max-width: 700px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } .nav { display: none; } }
     .metric-card { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 1rem; }
     .metric-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; }
     .metric-value { font-size: 22px; font-weight: 500; }
@@ -151,7 +150,6 @@
 
     /* TWO COL */
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
 
     /* MODAL */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; padding: 1rem; }
@@ -236,9 +234,125 @@
     /* SPARPLAN */
     .sparplan-card { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 12px; }
     .sparplan-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
-    @media (max-width: 600px) { .sparplan-meta { grid-template-columns: repeat(2, 1fr); } }
     .sparplan-meta-item .sp-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 3px; }
     .sparplan-meta-item .sp-val   { font-size: 15px; font-weight: 500; }
+
+    /* ── SIDEBAR ─────────────────────────────────────────────────────── */
+    .sidebar-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 150;
+    }
+    .sidebar-overlay.open { display: block; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 272px;
+      background: var(--bg-primary); z-index: 151;
+      border-right: 0.5px solid var(--border);
+      transform: translateX(-100%);
+      transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+      display: flex; flex-direction: column;
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.875rem 1.25rem; border-bottom: 0.5px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sidebar-close {
+      width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+      border: none; background: none; color: var(--text-secondary); cursor: pointer;
+      font-size: 18px; border-radius: var(--radius-md); line-height: 1;
+    }
+    .sidebar-nav { padding: 0.5rem; flex: 1; overflow-y: auto; }
+    .sidebar-nav-btn {
+      display: flex; align-items: center; width: 100%; min-height: 48px;
+      padding: 0 16px; font-size: 15px; font-family: var(--font);
+      border: none; background: transparent; color: var(--text-secondary);
+      border-radius: var(--radius-md); cursor: pointer; text-align: left;
+      margin-bottom: 2px; transition: background 0.15s, color 0.15s;
+    }
+    .sidebar-nav-btn:hover  { background: var(--bg-secondary); color: var(--text-primary); }
+    .sidebar-nav-btn.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 500; }
+    .sidebar-footer {
+      padding: 1rem 1.25rem; border-top: 0.5px solid var(--border);
+      display: none; flex-direction: column; gap: 8px; flex-shrink: 0;
+    }
+    .sidebar-footer.visible { display: flex; }
+
+    /* ── FAB ─────────────────────────────────────────────────────────── */
+    .fab {
+      display: none; position: fixed; bottom: 1.5rem; right: 1.5rem;
+      width: 54px; height: 54px; z-index: 100;
+      background: var(--blue); color: #E6F1FB;
+      border: none; border-radius: 50%; font-size: 28px; line-height: 1;
+      cursor: pointer; font-family: var(--font);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.22);
+      align-items: center; justify-content: center;
+    }
+
+    /* ── HAMBURGER ───────────────────────────────────────────────────── */
+    .hamburger-btn {
+      display: none; width: 44px; height: 44px;
+      align-items: center; justify-content: center;
+      border: none; background: none; cursor: pointer;
+      font-size: 20px; color: var(--text-primary);
+      border-radius: var(--radius-md); flex-shrink: 0;
+    }
+
+    /* ── MOBILE BREAKPOINT ───────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      /* Header */
+      .header { padding: 0.625rem 1rem; }
+      .header-left { gap: 0; }
+      .nav { display: none; }
+      .hamburger-btn { display: flex; }
+      #header-add-btn { display: none !important; }
+      #demo-badge { display: none !important; }
+
+      /* FAB */
+      .fab { display: flex; }
+
+      /* Spacing */
+      .main { padding: 1rem; padding-bottom: 5.5rem; }
+
+      /* Metrics 2×2 */
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+
+      /* Charts stack */
+      .two-col { grid-template-columns: 1fr; }
+
+      /* Table → Cards in dashboard */
+      #table-wrapper { display: none; }
+      #dashboard-mobile-cards { display: block; }
+
+      /* Sparplan meta 2×2 */
+      .sparplan-meta { grid-template-columns: repeat(2, 1fr); }
+
+      /* Modal → Bottom Sheet */
+      .modal-overlay { align-items: flex-end; padding: 0; }
+      .modal {
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        width: 100%; max-width: 100%; max-height: 92vh;
+        border-left: none; border-right: none; border-bottom: none;
+        transform: translateY(100%);
+        transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .modal-overlay.open .modal { transform: translateY(0); }
+
+      /* Touch targets (min 44px) */
+      .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      .analyze-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      .toggle-btn { min-height: 44px; }
+      .form-input { min-height: 44px; font-size: 16px; } /* 16px prevents iOS auto-zoom */
+      select.form-input { min-height: 44px; }
+
+      /* Form grid → stacked on very small screens */
+      .form-row-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (min-width: 769px) {
+      #dashboard-mobile-cards { display: none; }
+      .sidebar-overlay, .sidebar { display: none !important; }
+    }
   </style>
 </head>
 <body>
@@ -248,6 +362,7 @@
   <!-- HEADER -->
   <header class="header">
     <div class="header-left">
+      <button class="hamburger-btn" id="hamburger-btn" onclick="openSidebar()" aria-label="Menü öffnen">☰</button>
       <div class="logo">Portf<span>AI</span>o</div>
       <nav class="nav">
         <button class="nav-btn active" onclick="showView('dashboard')">Übersicht</button>
@@ -306,7 +421,7 @@
             <button class="btn" onclick="openAddModal()">+ Hinzufügen</button>
           </div>
         </div>
-        <div class="card-flush">
+        <div class="card-flush" id="table-wrapper">
           <table class="stock-table">
             <thead>
               <tr>
@@ -323,6 +438,7 @@
             <tbody id="table-body"></tbody>
           </table>
         </div>
+        <div id="dashboard-mobile-cards"></div>
       </div>
 
       <div class="two-col">
@@ -451,6 +567,30 @@
     </div>
   </div>
 </div>
+
+<!-- SIDEBAR -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-head">
+    <div class="logo">Portf<span>AI</span>o</div>
+    <button class="sidebar-close" onclick="closeSidebar()" aria-label="Menü schließen">✕</button>
+  </div>
+  <nav class="sidebar-nav">
+    <button class="sidebar-nav-btn active" id="sb-dashboard" onclick="sidebarNav('dashboard')">Übersicht</button>
+    <button class="sidebar-nav-btn" id="sb-stocks"   onclick="sidebarNav('stocks')">Positionen</button>
+    <button class="sidebar-nav-btn" id="sb-sparplan" onclick="sidebarNav('sparplan')">Sparplan</button>
+    <button class="sidebar-nav-btn" id="sb-news"     onclick="sidebarNav('news')">News & Alerts</button>
+    <button class="sidebar-nav-btn" id="sb-analysis" onclick="sidebarNav('analysis')">KI-Analyse</button>
+  </nav>
+  <div class="sidebar-footer" id="sidebar-demo-footer">
+    <span class="demo-label">Demo-Daten aktiv</span>
+    <button class="demo-link" onclick="resetDemo();closeSidebar()">Zurücksetzen</button>
+    <button class="demo-link" onclick="startOwnPortfolio();closeSidebar()" style="color:var(--blue)">Eigenes Portfolio starten</button>
+  </div>
+</aside>
+
+<!-- FAB -->
+<button class="fab" id="fab-add" onclick="openAddModal()" aria-label="Position hinzufügen">+</button>
 
 <!-- SPARPLAN MODAL -->
 <div class="modal-overlay" id="sparplan-modal">
@@ -593,14 +733,31 @@
     btn.innerHTML = 'Kurse aktualisieren';
   }
 
+  // ─── Sidebar ─────────────────────────────────────────────────────────
+  function openSidebar() {
+    document.getElementById('sidebar').classList.add('open');
+    document.getElementById('sidebar-overlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function sidebarNav(v) { showView(v); closeSidebar(); }
+
   // ─── Navigation ──────────────────────────────────────────────────────
   function showView(v) {
-    ['dashboard','stocks','sparplan','news','analysis'].forEach((id, i) => {
+    const views = ['dashboard','stocks','sparplan','news','analysis'];
+    views.forEach((id, i) => {
       document.getElementById('view-'+id).style.display = id === v ? '' : 'none';
       document.querySelectorAll('.nav-btn')[i].classList.toggle('active', id === v);
+      document.getElementById('sb-'+id).classList.toggle('active', id === v);
     });
-    document.getElementById('header-add-btn').style.display =
-      ['dashboard','stocks'].includes(v) ? '' : 'none';
+    const canAdd = ['dashboard','stocks'].includes(v);
+    document.getElementById('header-add-btn').style.display = canAdd ? '' : 'none';
+    const fab = document.getElementById('fab-add');
+    fab.style.display = canAdd ? '' : 'none';
     if (v === 'news')     renderNews();
     if (v === 'stocks')   renderStockCards();
     if (v === 'sparplan') renderSparplan();
@@ -714,6 +871,7 @@
     document.getElementById('sectors-info').textContent = sectors.length > 0 ? sectors.slice(0, 3).join(', ') + (sectors.length > 3 ? ' …' : '') : '–';
 
     renderTable();
+    renderStockCards('dashboard-mobile-cards');
     renderCharts(totalValue);
     renderAlerts();
   }
@@ -864,8 +1022,8 @@
   }
 
   // ─── Stock Cards ──────────────────────────────────────────────────────
-  function renderStockCards() {
-    const container = document.getElementById('stocks-cards');
+  function renderStockCards(targetId = 'stocks-cards') {
+    const container = document.getElementById(targetId);
     if (portfolio.length === 0) {
       container.innerHTML = `<div class="empty-state card"><h4>Keine Positionen vorhanden</h4><p>Starte mit deiner ersten Aktie oder ETF.</p><button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button></div>`;
       return;
@@ -1101,7 +1259,9 @@ Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei ko
   function isDemoMode() { return localStorage.getItem('portfaio-demo') === '1'; }
 
   function updateDemoBadge() {
-    document.getElementById('demo-badge').style.display = isDemoMode() ? 'flex' : 'none';
+    const show = isDemoMode();
+    document.getElementById('demo-badge').style.display = show ? 'flex' : 'none';
+    document.getElementById('sidebar-demo-footer').classList.toggle('visible', show);
   }
 
   async function loadSampleData() {
