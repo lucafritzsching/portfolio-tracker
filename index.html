@@ -384,18 +384,8 @@
         <input class="form-input" id="input-shares" type="number" placeholder="10" min="0.001" step="0.001" />
       </div>
       <div class="form-row">
-        <label class="form-label">Kaufpreis (€)</label>
-        <input class="form-input" id="input-buy-price" type="number" placeholder="150.00" step="0.01" />
-      </div>
-    </div>
-    <div class="form-row-grid">
-      <div class="form-row">
-        <label class="form-label">Aktueller Kurs (€)</label>
-        <input class="form-input" id="input-current-price" type="number" placeholder="170.00" step="0.01" />
-      </div>
-      <div class="form-row">
-        <label class="form-label">Tagesänderung (%)</label>
-        <input class="form-input" id="input-day-change" type="number" placeholder="+1.2" step="0.01" />
+        <label class="form-label">Kaufpreis (€) <span style="font-weight:400;color:var(--text-tertiary)">– Optional, für G/V</span></label>
+        <input class="form-input" id="input-buy-price" type="number" placeholder="z.B. 150.00" step="0.01" />
       </div>
     </div>
     <div class="form-row">
@@ -423,6 +413,7 @@
   let portfolio = JSON.parse(localStorage.getItem('portfaio-portfolio') || '[]');
   let allocChart = null, sectorChart = null;
   let tickerDebounce = null;
+  let pendingQuote = null;  // holds { currentPrice, dayChange } fetched from /api/quote
 
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
 
@@ -442,6 +433,7 @@
   // Auto-fill modal when ticker is typed
   document.getElementById('input-ticker').addEventListener('input', function () {
     clearTimeout(tickerDebounce);
+    pendingQuote = null;
     const sym = this.value.trim().toUpperCase();
     const status = document.getElementById('quote-status');
     if (sym.length < 1) { status.textContent = ''; status.className = 'quote-status'; return; }
@@ -450,11 +442,11 @@
     tickerDebounce = setTimeout(async () => {
       try {
         const q = await fetchQuote(sym);
-        document.getElementById('input-current-price').value = q.currentPrice;
-        document.getElementById('input-day-change').value = q.dayChange.toFixed(2);
+        pendingQuote = q;
         status.className = 'quote-status success';
         status.textContent = `✓ Kurs geladen: €${fmt(q.currentPrice)} (${q.dayChange >= 0 ? '+' : ''}${q.dayChange.toFixed(2)}% heute)`;
       } catch (e) {
+        pendingQuote = null;
         status.className = 'quote-status error';
         status.textContent = `✕ ${e.message}`;
       }
@@ -497,8 +489,9 @@
   function openAddModal() { document.getElementById('add-modal').classList.add('open'); }
   function closeModal() {
     clearTimeout(tickerDebounce);
+    pendingQuote = null;
     document.getElementById('add-modal').classList.remove('open');
-    ['input-ticker','input-name','input-shares','input-buy-price','input-current-price','input-day-change'].forEach(id => {
+    ['input-ticker','input-name','input-shares','input-buy-price'].forEach(id => {
       document.getElementById(id).value = '';
     });
     document.getElementById('input-sector').value = 'Technologie';
@@ -514,15 +507,23 @@
     const ticker = document.getElementById('input-ticker').value.trim().toUpperCase();
     const name = document.getElementById('input-name').value.trim();
     const shares = parseFloat(document.getElementById('input-shares').value);
-    const buyPrice = parseFloat(document.getElementById('input-buy-price').value);
-    const currentPrice = parseFloat(document.getElementById('input-current-price').value);
-    const dayChange = parseFloat(document.getElementById('input-day-change').value) || 0;
+    const buyPriceRaw = document.getElementById('input-buy-price').value.trim();
+    const buyPrice = buyPriceRaw !== '' ? parseFloat(buyPriceRaw) : null;
     const sector = document.getElementById('input-sector').value;
-    if (!ticker || !name || !shares || !buyPrice || !currentPrice) {
-      alert('Bitte Ticker, Name, Anzahl, Kaufpreis und aktuellen Kurs ausfüllen.');
+    if (!ticker || !name || !shares) {
+      alert('Bitte Ticker, Name und Anzahl ausfüllen.');
       return;
     }
-    portfolio.push({ ticker, name, shares, buyPrice, currentPrice, dayChange, sector, alerts: { news: true } });
+    if (!pendingQuote) {
+      alert('Bitte warte, bis der aktuelle Kurs geladen wurde (grüne Bestätigung unter dem Ticker).');
+      return;
+    }
+    portfolio.push({
+      ticker, name, shares, buyPrice,
+      currentPrice: pendingQuote.currentPrice,
+      dayChange: pendingQuote.dayChange,
+      sector, alerts: { news: true }
+    });
     save();
     closeModal();
     updateDashboard();
@@ -540,17 +541,20 @@
   // ─── Calculations ────────────────────────────────────────────────────
   function calcPortfolio() {
     const totalValue = portfolio.reduce((s, p) => s + p.shares * p.currentPrice, 0);
-    const totalCost  = portfolio.reduce((s, p) => s + p.shares * p.buyPrice, 0);
+    const totalCost  = portfolio.reduce((s, p) => p.buyPrice != null ? s + p.shares * p.buyPrice : s, 0);
     const dayPnl     = portfolio.reduce((s, p) => s + p.shares * p.currentPrice * (p.dayChange / 100), 0);
     const totalPnl   = totalValue - totalCost;
-    const totalRet   = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
-    return { totalValue, totalCost, dayPnl, totalPnl, totalRet };
+    const hasCost    = portfolio.some(p => p.buyPrice != null);
+    const totalRet   = hasCost && totalCost > 0 ? (totalPnl / totalCost * 100) : null;
+    return { totalValue, totalCost, dayPnl, totalPnl, totalRet, hasCost };
   }
 
   function getSignal(p) {
-    const pct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
-    if (pct > 20) return { label: 'Verkaufen', cls: 'badge-sell' };
-    if (pct < -12) return { label: 'Nachkaufen', cls: 'badge-buy' };
+    if (p.buyPrice != null) {
+      const pct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+      if (pct > 20)  return { label: 'Verkaufen',  cls: 'badge-sell' };
+      if (pct < -12) return { label: 'Nachkaufen', cls: 'badge-buy' };
+    }
     if (Math.abs(p.dayChange) > 4) return { label: 'Beobachten', cls: 'badge-hold' };
     return { label: 'Halten', cls: 'badge-hold' };
   }
@@ -560,17 +564,23 @@
 
   // ─── Dashboard ───────────────────────────────────────────────────────
   function updateDashboard() {
-    const { totalValue, totalCost, dayPnl, totalPnl, totalRet } = calcPortfolio();
+    const { totalValue, totalCost, dayPnl, totalPnl, totalRet, hasCost } = calcPortfolio();
     const dayPct = totalValue > 0 ? (dayPnl / (totalValue - dayPnl) * 100) : 0;
 
     document.getElementById('total-value').textContent = '€' + fmt(totalValue);
-    document.getElementById('total-cost-sub').textContent = 'Einsatz: €' + fmt(totalCost);
+    document.getElementById('total-cost-sub').textContent = hasCost ? 'Einsatz: €' + fmt(totalCost) : 'Kein Kaufpreis hinterlegt';
     document.getElementById('day-pnl').textContent = (dayPnl >= 0 ? '+' : '') + '€' + fmt(dayPnl);
     document.getElementById('day-pnl').className = 'metric-value ' + (dayPnl >= 0 ? 'green' : 'red');
     document.getElementById('day-pnl-pct').textContent = fmtPct(dayPct);
-    document.getElementById('total-return').textContent = fmtPct(totalRet);
-    document.getElementById('total-return').className = 'metric-value ' + (totalRet >= 0 ? 'green' : 'red');
-    document.getElementById('total-return-abs').textContent = (totalPnl >= 0 ? '+€' : '-€') + fmt(Math.abs(totalPnl)) + ' Gesamt';
+    if (totalRet !== null) {
+      document.getElementById('total-return').textContent = fmtPct(totalRet);
+      document.getElementById('total-return').className = 'metric-value ' + (totalRet >= 0 ? 'green' : 'red');
+      document.getElementById('total-return-abs').textContent = (totalPnl >= 0 ? '+€' : '-€') + fmt(Math.abs(totalPnl)) + ' Gesamt';
+    } else {
+      document.getElementById('total-return').textContent = '–';
+      document.getElementById('total-return').className = 'metric-value';
+      document.getElementById('total-return-abs').textContent = 'Kaufpreise fehlen';
+    }
     document.getElementById('num-positions').textContent = portfolio.length;
 
     const sectors = [...new Set(portfolio.map(p => p.sector))];
@@ -589,9 +599,14 @@
     }
     tbody.innerHTML = portfolio.map((p, i) => {
       const value = p.shares * p.currentPrice;
-      const pnl   = (p.currentPrice - p.buyPrice) * p.shares;
-      const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
       const sig = getSignal(p);
+      const pnlCell = p.buyPrice != null
+        ? (() => {
+            const pnl    = (p.currentPrice - p.buyPrice) * p.shares;
+            const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+            return `<td class="${pnl >= 0 ? 'green' : 'red'}">${pnl >= 0 ? '+' : ''}€${fmt(pnl)}<br><span style="font-size:11px">${fmtPct(pnlPct)}</span></td>`;
+          })()
+        : `<td style="color:var(--text-tertiary)">–</td>`;
       return `<tr>
         <td>
           <div class="ticker-name">${p.ticker}</div>
@@ -601,10 +616,7 @@
         <td class="${p.dayChange >= 0 ? 'green' : 'red'}">${fmtPct(p.dayChange)}</td>
         <td>${p.shares}</td>
         <td>€${fmt(value)}</td>
-        <td class="${pnl >= 0 ? 'green' : 'red'}">
-          ${pnl >= 0 ? '+' : ''}€${fmt(pnl)}<br>
-          <span style="font-size:11px">${fmtPct(pnlPct)}</span>
-        </td>
+        ${pnlCell}
         <td><span class="badge ${sig.cls}">${sig.label}</span></td>
         <td style="white-space: nowrap;">
           <button class="analyze-btn" onclick="quickAnalyze(${i})" style="margin-right:4px">Analyse ↗</button>
@@ -716,9 +728,10 @@
     }
     container.innerHTML = portfolio.map((p, i) => {
       const value  = p.shares * p.currentPrice;
-      const pnl    = (p.currentPrice - p.buyPrice) * p.shares;
-      const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
       const sig = getSignal(p);
+      const hasBuy = p.buyPrice != null;
+      const pnl    = hasBuy ? (p.currentPrice - p.buyPrice) * p.shares : null;
+      const pnlPct = hasBuy ? (p.currentPrice - p.buyPrice) / p.buyPrice * 100 : null;
       return `<div class="card" style="margin-bottom: 12px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
           <div>
@@ -728,12 +741,12 @@
           <span class="badge ${sig.cls}">${sig.label}</span>
         </div>
         <div class="stock-detail-grid">
-          <div class="detail-item"><div class="detail-label">Kaufpreis</div><div class="detail-val">€${fmt(p.buyPrice)}</div></div>
+          <div class="detail-item"><div class="detail-label">Kaufpreis</div><div class="detail-val">${hasBuy ? '€' + fmt(p.buyPrice) : '<span style="color:var(--text-tertiary)">–</span>'}</div></div>
           <div class="detail-item"><div class="detail-label">Aktueller Kurs</div><div class="detail-val">€${fmt(p.currentPrice)}</div></div>
           <div class="detail-item"><div class="detail-label">Anzahl Stücke</div><div class="detail-val">${p.shares}</div></div>
           <div class="detail-item"><div class="detail-label">Gesamtwert</div><div class="detail-val">€${fmt(value)}</div></div>
-          <div class="detail-item"><div class="detail-label">Gewinn/Verlust</div><div class="detail-val ${pnl >= 0 ? 'green' : 'red'}">${pnl >= 0 ? '+' : ''}€${fmt(pnl)}</div></div>
-          <div class="detail-item"><div class="detail-label">Rendite</div><div class="detail-val ${pnlPct >= 0 ? 'green' : 'red'}">${fmtPct(pnlPct)}</div></div>
+          <div class="detail-item"><div class="detail-label">Gewinn/Verlust</div><div class="detail-val ${hasBuy ? (pnl >= 0 ? 'green' : 'red') : ''}">${hasBuy ? (pnl >= 0 ? '+' : '') + '€' + fmt(pnl) : '<span style="color:var(--text-tertiary)">–</span>'}</div></div>
+          <div class="detail-item"><div class="detail-label">Rendite</div><div class="detail-val ${hasBuy ? (pnlPct >= 0 ? 'green' : 'red') : ''}">${hasBuy ? fmtPct(pnlPct) : '<span style="color:var(--text-tertiary)">–</span>'}</div></div>
           <div class="detail-item"><div class="detail-label">Heute</div><div class="detail-val ${p.dayChange >= 0 ? 'green' : 'red'}">${fmtPct(p.dayChange)}</div></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:0.5px solid var(--border)">
@@ -768,12 +781,14 @@
     const p = portfolio[i];
     const box = document.getElementById('analysis-' + i);
     if (!box) return;
-    const pnlPct = ((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(2);
     const sig = getSignal(p);
     box.innerHTML = '<span class="loading-spinner"></span> Analysiere...';
+    const perfLine = p.buyPrice != null
+      ? `Kaufpreis: €${p.buyPrice} | Performance: ${((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(2)}% | `
+      : '';
     const prompt = `Du bist ein erfahrener Aktienanalyst. Analysiere folgende Position kurz und prägnant auf Deutsch (max. 80 Wörter, kein Haftungsausschluss):
 Ticker: ${p.ticker} | Unternehmen: ${p.name} | Sektor: ${p.sector}
-Kaufpreis: €${p.buyPrice} | Aktueller Kurs: €${p.currentPrice} | Performance: ${pnlPct}% | Heute: ${p.dayChange}%
+${perfLine}Aktueller Kurs: €${p.currentPrice} | Heute: ${p.dayChange}%
 Algo-Signal: ${sig.label}
 Struktur: 1) Kurze Lageeinschätzung 2) Ein Risikofaktor 3) Konkrete Handlungsempfehlung`;
     try {
