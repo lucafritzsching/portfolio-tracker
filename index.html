@@ -705,10 +705,10 @@ Kaufpreis: €${p.buyPrice} | Aktueller Kurs: €${p.currentPrice} | Performance
 Algo-Signal: ${sig.label}
 Struktur: 1) Kurze Lageeinschätzung 2) Ein Risikofaktor 3) Konkrete Handlungsempfehlung`;
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
       });
       const data = await res.json();
       const text = (data.content || []).map(c => c.text || '').join('');
@@ -737,10 +737,10 @@ Gesamtrendite: ${totalRet.toFixed(2)}% | Positionen: ${summary}
 Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei konkrete Optimierungsmaßnahmen`;
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
       });
       const data = await res.json();
       const text = (data.content || []).map(c => c.text || '').join('');
