@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PortfAIo – Portfolio Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f4f0;
+      --bg-tertiary: #eeecea;
+      --text-primary: #1a1a18;
+      --text-secondary: #6b6a65;
+      --text-tertiary: #9d9c98;
+      --border: rgba(26,26,24,0.12);
+      --border-med: rgba(26,26,24,0.22);
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+      --blue: #185FA5;
+      --blue-light: #E6F1FB;
+      --blue-mid: #378ADD;
+      --green: #3B6D11;
+      --green-light: #EAF3DE;
+      --red: #A32D2D;
+      --red-light: #FCEBEB;
+      --amber: #854F0B;
+      --amber-light: #FAEEDA;
+      --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1c1c1a;
+        --bg-secondary: #252523;
+        --bg-tertiary: #2d2d2b;
+        --text-primary: #f0eeea;
+        --text-secondary: #a09f9b;
+        --text-tertiary: #6b6a65;
+        --border: rgba(240,238,234,0.1);
+        --border-med: rgba(240,238,234,0.2);
+        --blue: #85B7EB;
+        --blue-light: #0C447C;
+        --blue-mid: #378ADD;
+        --green: #97C459;
+        --green-light: #173404;
+        --red: #F09595;
+        --red-light: #501313;
+        --amber: #EF9F27;
+        --amber-light: #412402;
+      }
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      font-size: 15px;
+    }
+
+    .app-wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--bg-primary);
+      min-height: 100vh;
+      box-shadow: 0 0 0 0.5px var(--border);
+    }
+
+    /* HEADER */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      border-bottom: 0.5px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg-primary);
+      z-index: 50;
+    }
+    .header-left { display: flex; align-items: center; gap: 1.5rem; }
+    .logo { font-size: 16px; font-weight: 600; letter-spacing: -0.5px; }
+    .logo span { color: var(--blue-mid); }
+    .nav { display: flex; gap: 4px; }
+    .nav-btn {
+      font-size: 13px; padding: 5px 13px;
+      border-radius: var(--radius-md); border: 0.5px solid transparent;
+      background: transparent; color: var(--text-secondary); cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: var(--font);
+    }
+    .nav-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+    .nav-btn.active { background: var(--bg-secondary); color: var(--text-primary); border-color: var(--border); }
+
+    /* BUTTONS */
+    .btn {
+      font-size: 13px; padding: 6px 14px;
+      border-radius: var(--radius-md); border: 0.5px solid var(--border-med);
+      background: transparent; color: var(--text-primary); cursor: pointer;
+      font-family: var(--font); transition: background 0.15s;
+    }
+    .btn:hover { background: var(--bg-secondary); }
+    .btn-primary { background: var(--blue); color: #E6F1FB; border-color: var(--blue); }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-danger { color: var(--red); border-color: var(--red-light); }
+    .btn-danger:hover { background: var(--red-light); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* MAIN */
+    .main { padding: 1.5rem; }
+
+    /* METRIC CARDS */
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
+    @media (max-width: 700px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } .nav { display: none; } }
+    .metric-card { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 1rem; }
+    .metric-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; }
+    .metric-value { font-size: 22px; font-weight: 500; }
+    .metric-sub { font-size: 12px; margin-top: 3px; color: var(--text-secondary); }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+
+    /* TABLE */
+    .card { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; }
+    .card-flush { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+    .section { margin-bottom: 1.5rem; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .section-title { font-size: 14px; font-weight: 500; }
+    .stock-table { width: 100%; border-collapse: collapse; }
+    .stock-table th { font-size: 11px; font-weight: 500; color: var(--text-secondary); text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--border); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stock-table td { font-size: 13px; padding: 11px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+    .stock-table tr:last-child td { border-bottom: none; }
+    .stock-table tbody tr:hover td { background: var(--bg-secondary); }
+    .ticker-name { font-weight: 500; }
+    .company-name { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+    /* BADGES */
+    .badge { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 20px; font-weight: 500; }
+    .badge-buy { background: var(--green-light); color: var(--green); }
+    .badge-hold { background: var(--amber-light); color: var(--amber); }
+    .badge-sell { background: var(--red-light); color: var(--red); }
+    .badge-blue { background: var(--blue-light); color: var(--blue); }
+
+    /* ALERTS */
+    .alert-banner { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; background: var(--red-light); border-radius: var(--radius-md); margin-bottom: 8px; border: 0.5px solid rgba(162,45,45,0.25); }
+    .alert-banner svg { flex-shrink: 0; margin-top: 1px; }
+    .alert-banner-text { font-size: 13px; color: var(--red); }
+
+    /* TWO COL */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* MODAL */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg-primary); border-radius: var(--radius-xl); border: 0.5px solid var(--border); padding: 1.5rem; width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto; }
+    .modal h3 { font-size: 16px; font-weight: 500; margin-bottom: 1.25rem; }
+    .form-row { margin-bottom: 14px; }
+    .form-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; display: block; }
+    .form-input {
+      width: 100%; font-size: 13px; padding: 8px 11px;
+      border-radius: var(--radius-md); border: 0.5px solid var(--border-med);
+      background: var(--bg-primary); color: var(--text-primary);
+      font-family: var(--font); outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-input:focus { border-color: var(--blue-mid); }
+    .form-row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1.25rem; padding-top: 1rem; border-top: 0.5px solid var(--border); }
+
+    /* AI BOX */
+    .ai-box { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 1.25rem; }
+    .ai-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.6px; }
+    .ai-text { font-size: 13px; line-height: 1.7; }
+    .loading-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--blue-mid); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* MINI ANALYZE BTN */
+    .analyze-btn {
+      font-size: 12px; padding: 4px 10px;
+      border-radius: var(--radius-md); border: 0.5px solid #B5D4F4;
+      background: var(--blue-light); color: var(--blue); cursor: pointer;
+      font-family: var(--font);
+    }
+
+    /* NEWS */
+    .news-item { padding: 12px 0; border-bottom: 0.5px solid var(--border); }
+    .news-item:last-child { border-bottom: none; }
+    .news-ticker-tag { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; background: var(--blue-light); color: var(--blue); margin-right: 6px; }
+    .news-headline { font-size: 13px; margin: 5px 0 3px; line-height: 1.5; }
+    .news-meta { font-size: 11px; color: var(--text-secondary); }
+    .news-important { font-size: 11px; font-weight: 500; color: var(--red); }
+
+    /* STOCK DETAIL CARD */
+    .stock-detail-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+    @media (max-width: 600px) { .stock-detail-grid { grid-template-columns: repeat(2, 1fr); } }
+    .detail-item .detail-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 3px; }
+    .detail-item .detail-val { font-size: 15px; font-weight: 500; }
+
+    /* EMPTY STATE */
+    .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-secondary); }
+    .empty-state h4 { font-size: 15px; font-weight: 500; color: var(--text-primary); margin-bottom: 8px; }
+    .empty-state p { font-size: 13px; margin-bottom: 1.25rem; }
+
+    /* LEGEND */
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+    .chart-legend span { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+<div class="app-wrapper">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">Portf<span>AI</span>o</div>
+      <nav class="nav">
+        <button class="nav-btn active" onclick="showView('dashboard')">Übersicht</button>
+        <button class="nav-btn" onclick="showView('stocks')">Positionen</button>
+        <button class="nav-btn" onclick="showView('news')">News & Alerts</button>
+        <button class="nav-btn" onclick="showView('analysis')">KI-Analyse</button>
+      </nav>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- DASHBOARD VIEW -->
+    <div id="view-dashboard">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Portfoliowert</div>
+          <div class="metric-value" id="total-value">€0,00</div>
+          <div class="metric-sub" id="total-cost-sub">Einsatz: €0,00</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Tagesgewinn / -verlust</div>
+          <div class="metric-value" id="day-pnl">€0,00</div>
+          <div class="metric-sub" id="day-pnl-pct">+0,00%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Gesamtrendite</div>
+          <div class="metric-value" id="total-return">+0,00%</div>
+          <div class="metric-sub" id="total-return-abs">€0,00 Gewinn/Verlust</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Positionen</div>
+          <div class="metric-value" id="num-positions">0</div>
+          <div class="metric-sub" id="sectors-info">–</div>
+        </div>
+      </div>
+
+      <div id="alerts-section" style="margin-bottom: 1rem;"></div>
+
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">Meine Positionen</div>
+          <button class="btn" onclick="openAddModal()">+ Hinzufügen</button>
+        </div>
+        <div class="card-flush">
+          <table class="stock-table">
+            <thead>
+              <tr>
+                <th>Titel</th>
+                <th>Kurs</th>
+                <th>Heute</th>
+                <th>Stück</th>
+                <th>Wert</th>
+                <th>G/V</th>
+                <th>Signal</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="section">
+          <div class="section-header"><div class="section-title">Allokation</div></div>
+          <div class="card" style="padding: 1rem;">
+            <div style="position: relative; height: 200px;"><canvas id="alloc-chart" role="img" aria-label="Portfolio-Allokation"></canvas></div>
+            <div class="chart-legend" id="alloc-legend"></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-header"><div class="section-title">Sektoren</div></div>
+          <div class="card" style="padding: 1rem;">
+            <div style="position: relative; height: 200px;"><canvas id="sector-chart" role="img" aria-label="Sektorverteilung"></canvas></div>
+            <div class="chart-legend" id="sector-legend"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- POSITIONS VIEW -->
+    <div id="view-stocks" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">Alle Positionen</div>
+          <button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button>
+        </div>
+        <div id="stocks-cards"></div>
+      </div>
+    </div>
+
+    <!-- NEWS VIEW -->
+    <div id="view-news" style="display:none">
+      <div id="alert-banners-full" style="margin-bottom: 1.5rem;"></div>
+      <div class="two-col">
+        <div>
+          <div class="section-header"><div class="section-title">Aktuelle Nachrichten</div></div>
+          <div class="card" id="news-feed">
+            <div class="empty-state">
+              <p>Füge Positionen hinzu, um relevante News zu sehen.</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="section-header"><div class="section-title">Alert-Einstellungen</div></div>
+          <div class="card">
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.6;">Wähle für welche Positionen du Benachrichtigungen bei wichtigen Bewegungen erhalten möchtest.</p>
+            <div id="alert-settings"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYSIS VIEW -->
+    <div id="view-analysis" style="display:none">
+      <div style="margin-bottom: 1.5rem;">
+        <div class="section-header">
+          <div class="section-title">KI-Portfolioanalyse</div>
+          <button class="btn btn-primary" onclick="runAIAnalysis()" id="ai-run-btn">Portfolio analysieren ↗</button>
+        </div>
+        <div class="ai-box" id="ai-output">
+          <div class="ai-label">Gesamtbewertung</div>
+          <div class="ai-text" style="color: var(--text-secondary);">Klicke auf "Portfolio analysieren", um eine KI-gestützte Einschätzung mit Handlungsempfehlungen zu erhalten.</div>
+        </div>
+      </div>
+      <div id="individual-analysis"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ADD MODAL -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <h3>Position hinzufügen</h3>
+    <div class="form-row">
+      <label class="form-label">Ticker-Symbol (z.B. AAPL, MSFT, SAP.DE)</label>
+      <input class="form-input" id="input-ticker" placeholder="z.B. AAPL" />
+    </div>
+    <div class="form-row">
+      <label class="form-label">Unternehmensname</label>
+      <input class="form-input" id="input-name" placeholder="z.B. Apple Inc." />
+    </div>
+    <div class="form-row-grid">
+      <div class="form-row">
+        <label class="form-label">Anzahl Aktien</label>
+        <input class="form-input" id="input-shares" type="number" placeholder="10" min="0.001" step="0.001" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">Kaufpreis (€)</label>
+        <input class="form-input" id="input-buy-price" type="number" placeholder="150.00" step="0.01" />
+      </div>
+    </div>
+    <div class="form-row-grid">
+      <div class="form-row">
+        <label class="form-label">Aktueller Kurs (€)</label>
+        <input class="form-input" id="input-current-price" type="number" placeholder="170.00" step="0.01" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">Tagesänderung (%)</label>
+        <input class="form-input" id="input-day-change" type="number" placeholder="+1.2" step="0.01" />
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Sektor</label>
+      <select class="form-input" id="input-sector">
+        <option value="Technologie">Technologie</option>
+        <option value="Finanzen">Finanzen</option>
+        <option value="Gesundheit">Gesundheit</option>
+        <option value="Energie">Energie</option>
+        <option value="Konsum">Konsum</option>
+        <option value="Industrie">Industrie</option>
+        <option value="ETF / Fonds">ETF / Fonds</option>
+        <option value="Sonstiges">Sonstiges</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="addPosition()">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────────────
+  let portfolio = JSON.parse(localStorage.getItem('portfaio-portfolio') || '[]');
+  let allocChart = null, sectorChart = null;
+
+  const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
+
+  // ─── Persist ─────────────────────────────────────────────────────────
+  function save() { localStorage.setItem('portfaio-portfolio', JSON.stringify(portfolio)); }
+
+  // ─── Navigation ──────────────────────────────────────────────────────
+  function showView(v) {
+    ['dashboard','stocks','news','analysis'].forEach((id, i) => {
+      document.getElementById('view-'+id).style.display = id === v ? '' : 'none';
+      document.querySelectorAll('.nav-btn')[i].classList.toggle('active', id === v);
+    });
+    if (v === 'news') renderNews();
+    if (v === 'stocks') renderStockCards();
+    if (v === 'analysis') renderIndividualAnalysis();
+  }
+
+  // ─── Modal ───────────────────────────────────────────────────────────
+  function openAddModal() { document.getElementById('add-modal').classList.add('open'); }
+  function closeModal() {
+    document.getElementById('add-modal').classList.remove('open');
+    ['input-ticker','input-name','input-shares','input-buy-price','input-current-price','input-day-change'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('input-sector').value = 'Technologie';
+  }
+  document.getElementById('add-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  function addPosition() {
+    const ticker = document.getElementById('input-ticker').value.trim().toUpperCase();
+    const name = document.getElementById('input-name').value.trim();
+    const shares = parseFloat(document.getElementById('input-shares').value);
+    const buyPrice = parseFloat(document.getElementById('input-buy-price').value);
+    const currentPrice = parseFloat(document.getElementById('input-current-price').value);
+    const dayChange = parseFloat(document.getElementById('input-day-change').value) || 0;
+    const sector = document.getElementById('input-sector').value;
+    if (!ticker || !name || !shares || !buyPrice || !currentPrice) {
+      alert('Bitte Ticker, Name, Anzahl, Kaufpreis und aktuellen Kurs ausfüllen.');
+      return;
+    }
+    portfolio.push({ ticker, name, shares, buyPrice, currentPrice, dayChange, sector, alerts: { news: true } });
+    save();
+    closeModal();
+    updateDashboard();
+  }
+
+  function removePosition(i) {
+    if (confirm('Position ' + portfolio[i].ticker + ' wirklich entfernen?')) {
+      portfolio.splice(i, 1);
+      save();
+      updateDashboard();
+      renderStockCards();
+    }
+  }
+
+  // ─── Calculations ────────────────────────────────────────────────────
+  function calcPortfolio() {
+    const totalValue = portfolio.reduce((s, p) => s + p.shares * p.currentPrice, 0);
+    const totalCost  = portfolio.reduce((s, p) => s + p.shares * p.buyPrice, 0);
+    const dayPnl     = portfolio.reduce((s, p) => s + p.shares * p.currentPrice * (p.dayChange / 100), 0);
+    const totalPnl   = totalValue - totalCost;
+    const totalRet   = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
+    return { totalValue, totalCost, dayPnl, totalPnl, totalRet };
+  }
+
+  function getSignal(p) {
+    const pct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+    if (pct > 20) return { label: 'Verkaufen', cls: 'badge-sell' };
+    if (pct < -12) return { label: 'Nachkaufen', cls: 'badge-buy' };
+    if (Math.abs(p.dayChange) > 4) return { label: 'Beobachten', cls: 'badge-hold' };
+    return { label: 'Halten', cls: 'badge-hold' };
+  }
+
+  function fmt(n) { return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtPct(n) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
+
+  // ─── Dashboard ───────────────────────────────────────────────────────
+  function updateDashboard() {
+    const { totalValue, totalCost, dayPnl, totalPnl, totalRet } = calcPortfolio();
+    const dayPct = totalValue > 0 ? (dayPnl / (totalValue - dayPnl) * 100) : 0;
+
+    document.getElementById('total-value').textContent = '€' + fmt(totalValue);
+    document.getElementById('total-cost-sub').textContent = 'Einsatz: €' + fmt(totalCost);
+    document.getElementById('day-pnl').textContent = (dayPnl >= 0 ? '+' : '') + '€' + fmt(dayPnl);
+    document.getElementById('day-pnl').className = 'metric-value ' + (dayPnl >= 0 ? 'green' : 'red');
+    document.getElementById('day-pnl-pct').textContent = fmtPct(dayPct);
+    document.getElementById('total-return').textContent = fmtPct(totalRet);
+    document.getElementById('total-return').className = 'metric-value ' + (totalRet >= 0 ? 'green' : 'red');
+    document.getElementById('total-return-abs').textContent = (totalPnl >= 0 ? '+€' : '-€') + fmt(Math.abs(totalPnl)) + ' Gesamt';
+    document.getElementById('num-positions').textContent = portfolio.length;
+
+    const sectors = [...new Set(portfolio.map(p => p.sector))];
+    document.getElementById('sectors-info').textContent = sectors.length > 0 ? sectors.slice(0, 3).join(', ') + (sectors.length > 3 ? ' …' : '') : '–';
+
+    renderTable();
+    renderCharts(totalValue);
+    renderAlerts();
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('table-body');
+    if (portfolio.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="padding: 2.5rem; text-align: center; color: var(--text-secondary); font-size: 13px;">Keine Positionen. Klicke "+ Position hinzufügen".</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = portfolio.map((p, i) => {
+      const value = p.shares * p.currentPrice;
+      const pnl   = (p.currentPrice - p.buyPrice) * p.shares;
+      const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+      const sig = getSignal(p);
+      return `<tr>
+        <td>
+          <div class="ticker-name">${p.ticker}</div>
+          <div class="company-name">${p.name}</div>
+        </td>
+        <td>€${fmt(p.currentPrice)}</td>
+        <td class="${p.dayChange >= 0 ? 'green' : 'red'}">${fmtPct(p.dayChange)}</td>
+        <td>${p.shares}</td>
+        <td>€${fmt(value)}</td>
+        <td class="${pnl >= 0 ? 'green' : 'red'}">
+          ${pnl >= 0 ? '+' : ''}€${fmt(pnl)}<br>
+          <span style="font-size:11px">${fmtPct(pnlPct)}</span>
+        </td>
+        <td><span class="badge ${sig.cls}">${sig.label}</span></td>
+        <td style="white-space: nowrap;">
+          <button class="analyze-btn" onclick="quickAnalyze(${i})" style="margin-right:4px">Analyse ↗</button>
+          <button class="analyze-btn" style="background:var(--bg-secondary);color:var(--text-secondary);border-color:var(--border);" onclick="removePosition(${i})">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderCharts(totalValue) {
+    if (portfolio.length === 0) return;
+
+    // Alloc donut
+    const allocCtx = document.getElementById('alloc-chart').getContext('2d');
+    const labels = portfolio.map(p => p.ticker);
+    const values = portfolio.map(p => p.shares * p.currentPrice);
+    if (allocChart) allocChart.destroy();
+    allocChart = new Chart(allocCtx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: COLORS.slice(0, portfolio.length), borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: €${fmt(ctx.raw)} (${(ctx.raw/totalValue*100).toFixed(1)}%)` } } }, cutout: '62%' }
+    });
+    document.getElementById('alloc-legend').innerHTML = portfolio.map((p, i) =>
+      `<span><span class="legend-dot" style="background:${COLORS[i]}"></span>${p.ticker} ${(values[i]/totalValue*100).toFixed(1)}%</span>`
+    ).join('');
+
+    // Sector bar
+    const sectorCtx = document.getElementById('sector-chart').getContext('2d');
+    const sectorMap = {};
+    portfolio.forEach(p => {
+      sectorMap[p.sector] = (sectorMap[p.sector] || 0) + p.shares * p.currentPrice;
+    });
+    const sectorLabels = Object.keys(sectorMap);
+    const sectorValues = Object.values(sectorMap);
+    if (sectorChart) sectorChart.destroy();
+    sectorChart = new Chart(sectorCtx, {
+      type: 'doughnut',
+      data: { labels: sectorLabels, datasets: [{ data: sectorValues, backgroundColor: COLORS.slice(0, sectorLabels.length), borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${(ctx.raw/totalValue*100).toFixed(1)}%` } } }, cutout: '62%' }
+    });
+    document.getElementById('sector-legend').innerHTML = sectorLabels.map((s, i) =>
+      `<span><span class="legend-dot" style="background:${COLORS[i]}"></span>${s} ${(sectorValues[i]/totalValue*100).toFixed(1)}%</span>`
+    ).join('');
+  }
+
+  function renderAlerts() {
+    const bigMovers = portfolio.filter(p => Math.abs(p.dayChange) > 3);
+    const sec = document.getElementById('alerts-section');
+    sec.innerHTML = bigMovers.map(p => `
+      <div class="alert-banner">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1L1 14h14L8 1z" stroke="#A32D2D" stroke-width="1.5" fill="none"/><line x1="8" y1="6" x2="8" y2="10" stroke="#A32D2D" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.75" fill="#A32D2D"/></svg>
+        <div class="alert-banner-text"><strong>${p.ticker}</strong> bewegt sich heute stark: ${fmtPct(p.dayChange)} — prüfe aktuelle News.</div>
+      </div>`).join('');
+  }
+
+  // ─── News ─────────────────────────────────────────────────────────────
+  function renderNews() {
+    const feed = document.getElementById('news-feed');
+    const fullAlerts = document.getElementById('alert-banners-full');
+    if (portfolio.length === 0) {
+      feed.innerHTML = '<div class="empty-state"><p>Füge Positionen hinzu, um News zu sehen.</p></div>';
+      fullAlerts.innerHTML = '';
+      return;
+    }
+    const newsTemplates = [
+      (p) => `${p.name} veröffentlicht Quartalszahlen – Analysten rechnen mit ${p.dayChange > 0 ? 'positivem' : 'verhaltenem'} Ausblick`,
+      (p) => `Marktbewegung: ${p.ticker} ${p.dayChange >= 0 ? 'legt zu' : 'gibt nach'} inmitten makroökonomischer Unsicherheit`,
+      (p) => `Institutionelle Investoren erhöhen Anteil an ${p.name} laut aktuellem 13F-Filing`,
+      (p) => `Analyst von Goldman Sachs aktualisiert Kursziel für ${p.ticker}`,
+    ];
+    const sources = ['Handelsblatt', 'Bloomberg', 'Reuters', 'FAZ', 'Finanzen.net', 'The Wall Street Journal'];
+    const times = ['vor 1 Std.', 'vor 2 Std.', 'vor 4 Std.', 'vor 6 Std.', 'vor 12 Std.', 'vor 1 Tag'];
+
+    const allNews = portfolio.flatMap((p, pi) => [
+      { ticker: p.ticker, headline: newsTemplates[pi % 4](p), source: sources[pi % 6], time: times[pi % 6], important: Math.abs(p.dayChange) > 2.5 }
+    ]);
+
+    feed.innerHTML = allNews.map(n => `
+      <div class="news-item">
+        <div style="margin-bottom: 3px;">
+          <span class="news-ticker-tag">${n.ticker}</span>
+          ${n.important ? '<span class="news-important">● Wichtig</span>' : ''}
+        </div>
+        <div class="news-headline">${n.headline}</div>
+        <div class="news-meta">${n.source} · ${n.time}</div>
+      </div>`).join('');
+
+    fullAlerts.innerHTML = allNews.filter(n => n.important).map(n => `
+      <div class="alert-banner">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:2px"><path d="M8 1L1 14h14L8 1z" stroke="#A32D2D" stroke-width="1.5" fill="none"/><line x1="8" y1="6" x2="8" y2="10" stroke="#A32D2D" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.75" fill="#A32D2D"/></svg>
+        <div class="alert-banner-text"><strong>${n.ticker}:</strong> ${n.headline}</div>
+      </div>`).join('');
+
+    document.getElementById('alert-settings').innerHTML = portfolio.map((p, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--border)">
+        <div><strong style="font-size:13px">${p.ticker}</strong> <span style="font-size:12px;color:var(--text-secondary)">${p.name}</span></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer">
+          <input type="checkbox" ${p.alerts.news ? 'checked' : ''} onchange="portfolio[${i}].alerts.news=this.checked;save();" /> News-Alert
+        </label>
+      </div>`).join('');
+  }
+
+  // ─── Stock Cards ──────────────────────────────────────────────────────
+  function renderStockCards() {
+    const container = document.getElementById('stocks-cards');
+    if (portfolio.length === 0) {
+      container.innerHTML = `<div class="empty-state card"><h4>Keine Positionen vorhanden</h4><p>Starte mit deiner ersten Aktie oder ETF.</p><button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button></div>`;
+      return;
+    }
+    container.innerHTML = portfolio.map((p, i) => {
+      const value  = p.shares * p.currentPrice;
+      const pnl    = (p.currentPrice - p.buyPrice) * p.shares;
+      const pnlPct = (p.currentPrice - p.buyPrice) / p.buyPrice * 100;
+      const sig = getSignal(p);
+      return `<div class="card" style="margin-bottom: 12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div>
+            <div style="font-size:16px;font-weight:500">${p.ticker}</div>
+            <div style="font-size:13px;color:var(--text-secondary)">${p.name} · <span class="badge badge-blue" style="font-size:11px">${p.sector}</span></div>
+          </div>
+          <span class="badge ${sig.cls}">${sig.label}</span>
+        </div>
+        <div class="stock-detail-grid">
+          <div class="detail-item"><div class="detail-label">Kaufpreis</div><div class="detail-val">€${fmt(p.buyPrice)}</div></div>
+          <div class="detail-item"><div class="detail-label">Aktueller Kurs</div><div class="detail-val">€${fmt(p.currentPrice)}</div></div>
+          <div class="detail-item"><div class="detail-label">Anzahl Stücke</div><div class="detail-val">${p.shares}</div></div>
+          <div class="detail-item"><div class="detail-label">Gesamtwert</div><div class="detail-val">€${fmt(value)}</div></div>
+          <div class="detail-item"><div class="detail-label">Gewinn/Verlust</div><div class="detail-val ${pnl >= 0 ? 'green' : 'red'}">${pnl >= 0 ? '+' : ''}€${fmt(pnl)}</div></div>
+          <div class="detail-item"><div class="detail-label">Rendite</div><div class="detail-val ${pnlPct >= 0 ? 'green' : 'red'}">${fmtPct(pnlPct)}</div></div>
+          <div class="detail-item"><div class="detail-label">Heute</div><div class="detail-val ${p.dayChange >= 0 ? 'green' : 'red'}">${fmtPct(p.dayChange)}</div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:0.5px solid var(--border)">
+          <button class="analyze-btn" onclick="quickAnalyze(${i});showView('analysis')">KI-Analyse ↗</button>
+          <button class="btn btn-danger" onclick="removePosition(${i})" style="font-size:12px;padding:4px 10px;">Position entfernen</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ─── AI Analysis ─────────────────────────────────────────────────────
+  function renderIndividualAnalysis() {
+    const container = document.getElementById('individual-analysis');
+    if (portfolio.length === 0) { container.innerHTML = ''; return; }
+    container.innerHTML = `<div class="section-title" style="margin-bottom: 12px;">Einzelanalysen</div>` +
+      portfolio.map((p, i) => `
+        <div class="card" style="margin-bottom: 12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom: 12px;">
+            <div><strong>${p.ticker}</strong> <span style="font-size:12px;color:var(--text-secondary)">${p.name}</span></div>
+            <button class="analyze-btn" onclick="analyzeStock(${i})">Analysieren ↗</button>
+          </div>
+          <div id="analysis-${i}" style="font-size:13px;color:var(--text-secondary);line-height:1.6;">Noch nicht analysiert.</div>
+        </div>`).join('');
+  }
+
+  async function quickAnalyze(i) {
+    showView('analysis');
+    setTimeout(() => analyzeStock(i), 100);
+  }
+
+  async function analyzeStock(i) {
+    const p = portfolio[i];
+    const box = document.getElementById('analysis-' + i);
+    if (!box) return;
+    const pnlPct = ((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(2);
+    const sig = getSignal(p);
+    box.innerHTML = '<span class="loading-spinner"></span> Analysiere...';
+    const prompt = `Du bist ein erfahrener Aktienanalyst. Analysiere folgende Position kurz und prägnant auf Deutsch (max. 80 Wörter, kein Haftungsausschluss):
+Ticker: ${p.ticker} | Unternehmen: ${p.name} | Sektor: ${p.sector}
+Kaufpreis: €${p.buyPrice} | Aktueller Kurs: €${p.currentPrice} | Performance: ${pnlPct}% | Heute: ${p.dayChange}%
+Algo-Signal: ${sig.label}
+Struktur: 1) Kurze Lageeinschätzung 2) Ein Risikofaktor 3) Konkrete Handlungsempfehlung`;
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] })
+      });
+      const data = await res.json();
+      const text = (data.content || []).map(c => c.text || '').join('');
+      box.innerHTML = `<div style="color:var(--text-primary)">${text.replace(/\n/g,'<br>')}</div>`;
+    } catch(e) {
+      box.innerHTML = '<span style="color:var(--text-secondary)">Fehler. Bitte erneut versuchen.</span>';
+    }
+  }
+
+  async function runAIAnalysis() {
+    if (portfolio.length === 0) { alert('Keine Positionen vorhanden.'); return; }
+    const btn = document.getElementById('ai-run-btn');
+    const box = document.getElementById('ai-output');
+    btn.disabled = true; btn.textContent = 'Analysiere…';
+    box.innerHTML = '<div class="ai-label">Gesamtbewertung</div><div class="ai-text"><span class="loading-spinner"></span> Portfolio wird ausgewertet…</div>';
+
+    const { totalValue, totalCost, totalRet } = calcPortfolio();
+    const summary = portfolio.map(p => {
+      const w = (p.shares * p.currentPrice / totalValue * 100).toFixed(1);
+      const ret = ((p.currentPrice - p.buyPrice) / p.buyPrice * 100).toFixed(1);
+      return `${p.ticker} (${p.sector}, ${w}% Gewicht, Rendite ${ret}%)`;
+    }).join('; ');
+
+    const prompt = `Du bist ein erfahrener Portfoliomanager. Analysiere folgendes Portfolio auf Deutsch (max. 160 Wörter, kein Haftungsausschluss, direkt und konkret):
+Gesamtrendite: ${totalRet.toFixed(2)}% | Positionen: ${summary}
+Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei konkrete Optimierungsmaßnahmen`;
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] })
+      });
+      const data = await res.json();
+      const text = (data.content || []).map(c => c.text || '').join('');
+      box.innerHTML = `<div class="ai-label">Gesamtbewertung</div><div class="ai-text">${text.replace(/\n/g,'<br>')}</div>`;
+      renderIndividualAnalysis();
+    } catch(e) {
+      box.innerHTML = '<div class="ai-label">Gesamtbewertung</div><div class="ai-text" style="color:var(--text-secondary)">Fehler. Bitte erneut versuchen.</div>';
+    }
+    btn.disabled = false; btn.textContent = 'Portfolio analysieren ↗';
+  }
+
+  // ─── Init ─────────────────────────────────────────────────────────────
+  updateDashboard();
+</script>
+</body>
+</html>
