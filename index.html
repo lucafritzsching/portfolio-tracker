@@ -226,6 +226,13 @@
     /* REFRESH BUTTON SPINNER */
     .btn-refresh { display: flex; align-items: center; gap: 6px; }
     .btn-refresh .loading-spinner { width: 12px; height: 12px; border-width: 1.5px; margin: 0; }
+
+    /* SPARPLAN */
+    .sparplan-card { background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 12px; }
+    .sparplan-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+    @media (max-width: 600px) { .sparplan-meta { grid-template-columns: repeat(2, 1fr); } }
+    .sparplan-meta-item .sp-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 3px; }
+    .sparplan-meta-item .sp-val   { font-size: 15px; font-weight: 500; }
   </style>
 </head>
 <body>
@@ -239,11 +246,12 @@
       <nav class="nav">
         <button class="nav-btn active" onclick="showView('dashboard')">Übersicht</button>
         <button class="nav-btn" onclick="showView('stocks')">Positionen</button>
+        <button class="nav-btn" onclick="showView('sparplan')">Sparplan</button>
         <button class="nav-btn" onclick="showView('news')">News & Alerts</button>
         <button class="nav-btn" onclick="showView('analysis')">KI-Analyse</button>
       </nav>
     </div>
-    <button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button>
+    <button class="btn btn-primary" id="header-add-btn" onclick="openAddModal()">+ Position hinzufügen</button>
   </header>
 
   <!-- MAIN -->
@@ -326,9 +334,19 @@
       <div class="section">
         <div class="section-header">
           <div class="section-title">Alle Positionen</div>
-          <button class="btn btn-primary" onclick="openAddModal()">+ Position hinzufügen</button>
         </div>
         <div id="stocks-cards"></div>
+      </div>
+    </div>
+
+    <!-- SPARPLAN VIEW -->
+    <div id="view-sparplan" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">Meine Sparpläne</div>
+          <button class="btn btn-primary" onclick="openSparplanModal()">+ Sparplan hinzufügen</button>
+        </div>
+        <div id="sparplan-cards"></div>
       </div>
     </div>
 
@@ -420,9 +438,35 @@
   </div>
 </div>
 
+<!-- SPARPLAN MODAL -->
+<div class="modal-overlay" id="sparplan-modal">
+  <div class="modal">
+    <h3>Sparplan hinzufügen</h3>
+    <div class="form-row">
+      <label class="form-label">Position</label>
+      <select class="form-input" id="sp-ticker"></select>
+    </div>
+    <div class="form-row-grid">
+      <div class="form-row">
+        <label class="form-label">Monatlicher Betrag (€)</label>
+        <input class="form-input" id="sp-amount" type="number" placeholder="100.00" step="0.01" min="1" />
+      </div>
+      <div class="form-row">
+        <label class="form-label">Ausführungstag (1–28)</label>
+        <input class="form-input" id="sp-day" type="number" placeholder="15" min="1" max="28" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSparplanModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="addSparplan()">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ─── State ───────────────────────────────────────────────────────────
-  let portfolio = JSON.parse(localStorage.getItem('portfaio-portfolio') || '[]');
+  let portfolio   = JSON.parse(localStorage.getItem('portfaio-portfolio')   || '[]');
+  let sparpläne   = JSON.parse(localStorage.getItem('portfaio-sparpläne')   || '[]');
   let allocChart = null, sectorChart = null;
   let tickerDebounce = null;
   let pendingQuote = null;   // holds { currentPrice, dayChange } fetched from /api/quote
@@ -431,7 +475,22 @@
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
 
   // ─── Persist ─────────────────────────────────────────────────────────
-  function save() { localStorage.setItem('portfaio-portfolio', JSON.stringify(portfolio)); }
+  function save()           { localStorage.setItem('portfaio-portfolio', JSON.stringify(portfolio)); }
+  function saveSparpläne()  { localStorage.setItem('portfaio-sparpläne', JSON.stringify(sparpläne)); }
+
+  // ─── Date helpers ────────────────────────────────────────────────────
+  function getNextExecution(day) {
+    const today = new Date();
+    const candidate = new Date(today.getFullYear(), today.getMonth(), day);
+    if (candidate >= today) return candidate;
+    return new Date(today.getFullYear(), today.getMonth() + 1, day);
+  }
+  function fmtDate(d) {
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+  function daysUntil(d) {
+    return Math.round((d - new Date().setHours(0,0,0,0)) / 86400000);
+  }
 
   // ─── Quote API ───────────────────────────────────────────────────────
   async function fetchQuote(symbol) {
@@ -522,12 +581,15 @@
 
   // ─── Navigation ──────────────────────────────────────────────────────
   function showView(v) {
-    ['dashboard','stocks','news','analysis'].forEach((id, i) => {
+    ['dashboard','stocks','sparplan','news','analysis'].forEach((id, i) => {
       document.getElementById('view-'+id).style.display = id === v ? '' : 'none';
       document.querySelectorAll('.nav-btn')[i].classList.toggle('active', id === v);
     });
-    if (v === 'news') renderNews();
-    if (v === 'stocks') renderStockCards();
+    document.getElementById('header-add-btn').style.display =
+      ['dashboard','stocks'].includes(v) ? '' : 'none';
+    if (v === 'news')     renderNews();
+    if (v === 'stocks')   renderStockCards();
+    if (v === 'sparplan') renderSparplan();
     if (v === 'analysis') renderIndividualAnalysis();
   }
 
@@ -715,12 +777,29 @@
 
   function renderAlerts() {
     const bigMovers = portfolio.filter(p => Math.abs(p.dayChange) > 3);
+    const dueSoon = sparpläne.filter(sp => {
+      const d = daysUntil(getNextExecution(sp.executionDay));
+      return d >= 0 && d <= 3;
+    });
     const sec = document.getElementById('alerts-section');
-    sec.innerHTML = bigMovers.map(p => `
-      <div class="alert-banner">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1L1 14h14L8 1z" stroke="#A32D2D" stroke-width="1.5" fill="none"/><line x1="8" y1="6" x2="8" y2="10" stroke="#A32D2D" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.75" fill="#A32D2D"/></svg>
-        <div class="alert-banner-text"><strong>${p.ticker}</strong> bewegt sich heute stark: ${fmtPct(p.dayChange)} — prüfe aktuelle News.</div>
-      </div>`).join('');
+    const warningIcon = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1L1 14h14L8 1z" stroke="#A32D2D" stroke-width="1.5" fill="none"/><line x1="8" y1="6" x2="8" y2="10" stroke="#A32D2D" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r="0.75" fill="#A32D2D"/></svg>`;
+    const infoIcon  = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="#185FA5" stroke-width="1.5"/><line x1="8" y1="7" x2="8" y2="11" stroke="#185FA5" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="#185FA5"/></svg>`;
+    sec.innerHTML = [
+      ...bigMovers.map(p => `
+        <div class="alert-banner" style="margin-bottom:8px">
+          ${warningIcon}
+          <div class="alert-banner-text"><strong>${p.ticker}</strong> bewegt sich heute stark: ${fmtPct(p.dayChange)} — prüfe aktuelle News.</div>
+        </div>`),
+      ...dueSoon.map(sp => {
+        const d = daysUntil(getNextExecution(sp.executionDay));
+        const when = d === 0 ? 'heute' : d === 1 ? 'morgen' : `in ${d} Tagen`;
+        return `
+        <div class="alert-banner" style="background:var(--blue-light);border-color:rgba(24,95,165,0.2);margin-bottom:8px">
+          ${infoIcon}
+          <div class="alert-banner-text" style="color:var(--blue)"><strong>Sparplan ${sp.ticker}</strong> wird ${when} ausgeführt — €${fmt(sp.monthlyAmount)}</div>
+        </div>`;
+      })
+    ].join('');
   }
 
   // ─── News ─────────────────────────────────────────────────────────────
@@ -888,6 +967,113 @@ Bewerte: 1) Diversifikation & Klumpenrisiken 2) Stärken & Schwächen 3) Drei ko
       box.innerHTML = '<div class="ai-label">Gesamtbewertung</div><div class="ai-text" style="color:var(--text-secondary)">Fehler. Bitte erneut versuchen.</div>';
     }
     btn.disabled = false; btn.textContent = 'Portfolio analysieren ↗';
+  }
+
+  // ─── Sparplan ────────────────────────────────────────────────────────
+  function openSparplanModal() {
+    const sel = document.getElementById('sp-ticker');
+    sel.innerHTML = portfolio.length === 0
+      ? '<option value="">Keine Positionen vorhanden</option>'
+      : portfolio.map(p => `<option value="${p.ticker}">${p.ticker} – ${p.name}</option>`).join('');
+    document.getElementById('sp-amount').value = '';
+    document.getElementById('sp-day').value = '';
+    document.getElementById('sparplan-modal').classList.add('open');
+  }
+  function closeSparplanModal() {
+    document.getElementById('sparplan-modal').classList.remove('open');
+  }
+  document.getElementById('sparplan-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeSparplanModal();
+  });
+
+  function addSparplan() {
+    const ticker = document.getElementById('sp-ticker').value;
+    const amount = parseFloat(document.getElementById('sp-amount').value);
+    const day    = parseInt(document.getElementById('sp-day').value, 10);
+    if (!ticker) { alert('Bitte eine Position auswählen.'); return; }
+    if (!amount || amount <= 0) { alert('Bitte einen gültigen Betrag eingeben.'); return; }
+    if (!day || day < 1 || day > 28) { alert('Bitte einen Ausführungstag zwischen 1 und 28 eingeben.'); return; }
+    sparpläne.push({ id: Date.now(), ticker, monthlyAmount: amount, executionDay: day, history: [] });
+    saveSparpläne();
+    closeSparplanModal();
+    renderSparplan();
+  }
+
+  function executeSparplan(id) {
+    const sp  = sparpläne.find(s => s.id === id);
+    const pos = portfolio.find(p => p.ticker === sp.ticker);
+    if (!pos) { alert(`Position ${sp.ticker} nicht mehr im Portfolio.`); return; }
+    if (!pos.currentPrice) { alert('Kein aktueller Kurs verfügbar.'); return; }
+    const sharesAdded = parseFloat((sp.monthlyAmount / pos.currentPrice).toFixed(6));
+    pos.shares = parseFloat((pos.shares + sharesAdded).toFixed(6));
+    sp.history.push({
+      date:   new Date().toISOString().slice(0, 10),
+      amount: sp.monthlyAmount,
+      shares: sharesAdded,
+      price:  pos.currentPrice,
+    });
+    save();
+    saveSparpläne();
+    updateDashboard();
+    renderSparplan();
+  }
+
+  function deleteSparplan(id) {
+    const sp = sparpläne.find(s => s.id === id);
+    if (!confirm(`Sparplan für ${sp.ticker} wirklich löschen?`)) return;
+    sparpläne = sparpläne.filter(s => s.id !== id);
+    saveSparpläne();
+    renderSparplan();
+  }
+
+  function renderSparplan() {
+    const container = document.getElementById('sparplan-cards');
+    if (sparpläne.length === 0) {
+      container.innerHTML = `<div class="empty-state card">
+        <h4>Keine Sparpläne vorhanden</h4>
+        <p>Lege deinen ersten automatischen Sparplan an.</p>
+        <button class="btn btn-primary" onclick="openSparplanModal()">+ Sparplan hinzufügen</button>
+      </div>`;
+      return;
+    }
+    container.innerHTML = sparpläne.map(sp => {
+      const nextDate     = getNextExecution(sp.executionDay);
+      const totalIn      = sp.history.reduce((s, h) => s + h.amount, 0);
+      const execCount    = sp.history.length;
+      const days         = daysUntil(nextDate);
+      const dueLabel     = days === 0 ? '<span style="color:var(--amber);font-weight:500">Heute</span>'
+                         : days === 1 ? '<span style="color:var(--amber);font-weight:500">Morgen</span>'
+                         : fmtDate(nextDate);
+      return `<div class="sparplan-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-size:16px;font-weight:500">${sp.ticker}</div>
+            <div style="font-size:13px;color:var(--text-secondary)">monatlich €${fmt(sp.monthlyAmount)} · Tag ${sp.executionDay}</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" style="font-size:12px;padding:5px 12px" onclick="executeSparplan(${sp.id})">Ausführen</button>
+            <button class="btn btn-danger" style="font-size:12px;padding:5px 10px" onclick="deleteSparplan(${sp.id})">✕</button>
+          </div>
+        </div>
+        <div class="sparplan-meta">
+          <div class="sparplan-meta-item"><div class="sp-label">Nächste Ausführung</div><div class="sp-val">${dueLabel}</div></div>
+          <div class="sparplan-meta-item"><div class="sp-label">Monatlicher Betrag</div><div class="sp-val">€${fmt(sp.monthlyAmount)}</div></div>
+          <div class="sparplan-meta-item"><div class="sp-label">Gesamteinzahlungen</div><div class="sp-val">€${fmt(totalIn)}</div></div>
+          <div class="sparplan-meta-item"><div class="sp-label">Ausführungen</div><div class="sp-val">${execCount}×</div></div>
+        </div>
+        ${sp.history.length > 0 ? `
+        <details style="margin-top:8px;font-size:12px">
+          <summary style="cursor:pointer;color:var(--text-secondary);user-select:none">Verlauf (${execCount} Einträge)</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+            ${sp.history.slice().reverse().map(h => `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:0.5px solid var(--border);color:var(--text-secondary)">
+                <span>${h.date}</span>
+                <span>€${fmt(h.amount)} → ${h.shares} Stück @ €${fmt(h.price)}</span>
+              </div>`).join('')}
+          </div>
+        </details>` : ''}
+      </div>`;
+    }).join('');
   }
 
   // ─── Init ─────────────────────────────────────────────────────────────
