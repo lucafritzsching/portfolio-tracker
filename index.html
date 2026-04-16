@@ -216,6 +216,13 @@
     .quote-status.success { color: var(--green); }
     .quote-status.error   { color: var(--red); }
 
+    /* SHARES TOGGLE */
+    .toggle-group { display: flex; border: 0.5px solid var(--border-med); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 8px; }
+    .toggle-btn { flex: 1; font-size: 12px; padding: 6px 0; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; font-family: var(--font); transition: background 0.15s, color 0.15s; }
+    .toggle-btn:not(:last-child) { border-right: 0.5px solid var(--border-med); }
+    .toggle-btn.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 500; }
+    .shares-hint { font-size: 12px; color: var(--text-secondary); margin-top: 5px; min-height: 17px; }
+
     /* REFRESH BUTTON SPINNER */
     .btn-refresh { display: flex; align-items: center; gap: 6px; }
     .btn-refresh .loading-spinner { width: 12px; height: 12px; border-width: 1.5px; margin: 0; }
@@ -380,8 +387,13 @@
     </div>
     <div class="form-row-grid">
       <div class="form-row">
-        <label class="form-label">Anzahl Aktien</label>
+        <label class="form-label" id="shares-label">Anzahl Aktien</label>
+        <div class="toggle-group">
+          <button type="button" class="toggle-btn active" id="toggle-shares" onclick="setSharesMode('shares')">Stückzahl</button>
+          <button type="button" class="toggle-btn" id="toggle-amount" onclick="setSharesMode('amount')">Betrag (€)</button>
+        </div>
         <input class="form-input" id="input-shares" type="number" placeholder="10" min="0.001" step="0.001" />
+        <div class="shares-hint" id="shares-hint"></div>
       </div>
       <div class="form-row">
         <label class="form-label">Kaufpreis (€) <span style="font-weight:400;color:var(--text-tertiary)">– Optional, für G/V</span></label>
@@ -413,7 +425,8 @@
   let portfolio = JSON.parse(localStorage.getItem('portfaio-portfolio') || '[]');
   let allocChart = null, sectorChart = null;
   let tickerDebounce = null;
-  let pendingQuote = null;  // holds { currentPrice, dayChange } fetched from /api/quote
+  let pendingQuote = null;   // holds { currentPrice, dayChange } fetched from /api/quote
+  let sharesMode = 'shares'; // 'shares' | 'amount'
 
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#639922','#BA7517','#E24B4A','#888780','#5DCAA5','#4A1B0C','#04342C'];
 
@@ -430,6 +443,38 @@
     return res.json(); // { currentPrice, dayChange, previousClose }
   }
 
+  // ─── Shares / Amount Toggle ──────────────────────────────────────────
+  function setSharesMode(mode) {
+    sharesMode = mode;
+    document.getElementById('toggle-shares').classList.toggle('active', mode === 'shares');
+    document.getElementById('toggle-amount').classList.toggle('active', mode === 'amount');
+    const input = document.getElementById('input-shares');
+    if (mode === 'shares') {
+      document.getElementById('shares-label').textContent = 'Anzahl Aktien';
+      input.placeholder = '10';
+      input.value = '';
+      document.getElementById('shares-hint').textContent = '';
+    } else {
+      document.getElementById('shares-label').textContent = 'Investitionsbetrag (€)';
+      input.placeholder = 'z.B. 1500.00';
+      input.value = '';
+      document.getElementById('shares-hint').textContent = pendingQuote ? '' : 'Ticker zuerst laden';
+    }
+    input.focus();
+  }
+
+  function updateSharesHint() {
+    if (sharesMode !== 'amount') return;
+    const hint = document.getElementById('shares-hint');
+    const raw = parseFloat(document.getElementById('input-shares').value);
+    if (!pendingQuote) { hint.textContent = 'Ticker zuerst laden'; return; }
+    if (!raw || raw <= 0) { hint.textContent = ''; return; }
+    const computed = raw / pendingQuote.currentPrice;
+    hint.textContent = `≈ ${computed.toFixed(4).replace(/\.?0+$/, '')} Stück`;
+  }
+
+  document.getElementById('input-shares').addEventListener('input', updateSharesHint);
+
   // Auto-fill modal when ticker is typed
   document.getElementById('input-ticker').addEventListener('input', function () {
     clearTimeout(tickerDebounce);
@@ -443,6 +488,7 @@
       try {
         const q = await fetchQuote(sym);
         pendingQuote = q;
+        updateSharesHint();
         status.className = 'quote-status success';
         status.textContent = `✓ Kurs geladen: €${fmt(q.currentPrice)} (${q.dayChange >= 0 ? '+' : ''}${q.dayChange.toFixed(2)}% heute)`;
       } catch (e) {
@@ -498,6 +544,8 @@
     const status = document.getElementById('quote-status');
     status.textContent = '';
     status.className = 'quote-status';
+    if (sharesMode !== 'shares') setSharesMode('shares');
+    document.getElementById('shares-hint').textContent = '';
   }
   document.getElementById('add-modal').addEventListener('click', function(e) {
     if (e.target === this) closeModal();
@@ -506,18 +554,21 @@
   function addPosition() {
     const ticker = document.getElementById('input-ticker').value.trim().toUpperCase();
     const name = document.getElementById('input-name').value.trim();
-    const shares = parseFloat(document.getElementById('input-shares').value);
+    const rawInput = parseFloat(document.getElementById('input-shares').value);
     const buyPriceRaw = document.getElementById('input-buy-price').value.trim();
     const buyPrice = buyPriceRaw !== '' ? parseFloat(buyPriceRaw) : null;
     const sector = document.getElementById('input-sector').value;
-    if (!ticker || !name || !shares) {
-      alert('Bitte Ticker, Name und Anzahl ausfüllen.');
+    if (!ticker || !name || !rawInput || rawInput <= 0) {
+      alert('Bitte Ticker, Name und ' + (sharesMode === 'amount' ? 'Betrag' : 'Anzahl') + ' ausfüllen.');
       return;
     }
     if (!pendingQuote) {
       alert('Bitte warte, bis der aktuelle Kurs geladen wurde (grüne Bestätigung unter dem Ticker).');
       return;
     }
+    const shares = sharesMode === 'amount'
+      ? parseFloat((rawInput / pendingQuote.currentPrice).toFixed(6))
+      : rawInput;
     portfolio.push({
       ticker, name, shares, buyPrice,
       currentPrice: pendingQuote.currentPrice,
