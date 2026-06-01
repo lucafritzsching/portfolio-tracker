@@ -50,6 +50,8 @@ export interface Quote {
   current_price: number
   day_change: number
   previous_close: number
+  name?: string | null
+  sector?: string | null
 }
 
 export interface Fundamentals {
@@ -99,4 +101,41 @@ export interface AgentStatus {
   model_available: boolean
   available_models?: string[]
   error?: string
+}
+
+export interface MetricRow {
+  id: number
+  ticker: string
+  model: string
+  signal: string
+  score: number
+  confidence: number
+  total_ms: number | null
+  tokens_per_sec: number | null
+  eval_tokens: number | null
+  faithful: boolean | null
+  faithfulness_notes: string | null
+  created_at: string
+}
+
+export interface EvalMetrics {
+  aggregate: {
+    runs: number
+    avg_tokens_per_sec: number | null
+    avg_total_ms: number | null
+    faithful_rate: number | null
+  }
+  recent: MetricRow[]
+}
+
+export interface SignalStats {
+  n: number
+  avg_return_pct: number | null
+  hit_rate: number | null
+}
+
+export interface Backtest {
+  params: { horizon_days: number; step_days: number; min_history: number }
+  per_ticker: Record<string, Record<string, SignalStats> | { error: string }>
+  aggregate: Record<string, SignalStats>
 }

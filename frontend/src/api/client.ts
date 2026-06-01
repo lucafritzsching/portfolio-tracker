@@ -1,5 +1,6 @@
 import type {
   Position, Transaction, SavingsPlan, Quote, Fundamentals, NewsItem, AgentStatus,
+  EvalMetrics, Backtest,
 } from '@/types'
 
 const BASE = 'http://localhost:8000/api'
@@ -86,6 +87,16 @@ export const api = {
     analyzePortfolio: (currentPrices: Record<string, number>): EventSource => {
       const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
       return new EventSource(`${BASE}/agent/analyze-portfolio?current_prices=${pricesParam}`)
+    },
+  },
+
+  // ── Eval ──────────────────────────────────────────────────────────────────────
+
+  eval: {
+    metrics: () => request<EvalMetrics>('/eval/metrics'),
+    backtest: (tickers: string[] = [], horizon = 20, step = 5) => {
+      const t = tickers.length ? `&tickers=${tickers.join(',')}` : ''
+      return request<Backtest>(`/eval/backtest?horizon=${horizon}&step=${step}${t}`)
     },
   },
 

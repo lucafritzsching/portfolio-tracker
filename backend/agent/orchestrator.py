@@ -15,10 +15,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.data_science import EnsembleDecision
-from agent.pipeline import build_ensemble_decision
-from agent.prompts import SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT
+from agent.pipeline import build_ensemble_decision, build_portfolio_snapshot
+from agent.prompts import (
+    SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT,
+    CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT, NEWS_SUMMARY_PROMPT, REBALANCE_PROMPT,
+)
 from config import settings
-from models import Position, AnalysisResult
+from eval.faithfulness import check_faithfulness
+from models import Position, AnalysisResult, AnalysisMetric
+from services.market_data import fetch_and_store_news
 
 _COMPONENT_LABELS = {
     "technical": "Technischer Trend",
@@ -92,12 +97,50 @@ async def analyze_stock_stream(
         {"role": "user", "content": user_prompt},
     ]
 
-    async for chunk in _stream_ollama_response(messages):
+    stats: dict = {}
+    explanation = ""
+    async for chunk in _stream_ollama_response(messages, stats):
+        explanation += chunk
         full_response += chunk
         yield chunk
 
     db.add(AnalysisResult(ticker=ticker, analysis_text=full_response, model=settings.ollama_model))
+    await _record_metric(db, ticker, decision, explanation, stats)
     await db.commit()
+
+
+async def _record_metric(
+    db: AsyncSession,
+    ticker: str,
+    decision: EnsembleDecision,
+    explanation: str,
+    stats: dict,
+) -> None:
+    """Persist latency/throughput + faithfulness for one analysis run (best-effort)."""
+    try:
+        eval_count = stats.get("eval_count")
+        eval_duration = stats.get("eval_duration")  # nanoseconds
+        tok_per_sec = (
+            round(eval_count / (eval_duration / 1e9), 2)
+            if eval_count and eval_duration else None
+        )
+        faith = check_faithfulness(decision, explanation)
+        db.add(AnalysisMetric(
+            ticker=ticker,
+            model=settings.ollama_model,
+            signal=decision.signal,
+            score=decision.score,
+            confidence=decision.confidence,
+            total_ms=int(stats["total_duration"] / 1e6) if stats.get("total_duration") else None,
+            load_ms=int(stats["load_duration"] / 1e6) if stats.get("load_duration") else None,
+            prompt_tokens=stats.get("prompt_eval_count"),
+            eval_tokens=eval_count,
+            tokens_per_sec=tok_per_sec,
+            faithful=faith["faithful"],
+            faithfulness_notes=faith["notes"] or None,
+        ))
+    except Exception:
+        pass  # metrics are observability, never break the analysis itself
 
 
 async def analyze_portfolio_stream(
@@ -136,8 +179,14 @@ async def analyze_portfolio_stream(
         yield chunk
 
 
-async def _stream_ollama_response(messages: list[dict]) -> AsyncGenerator[str, None]:
-    """Real token streaming from Ollama /api/chat (no tools, so the output is pure text)."""
+async def _stream_ollama_response(
+    messages: list[dict], stats: dict | None = None
+) -> AsyncGenerator[str, None]:
+    """Real token streaming from Ollama /api/chat (no tools, so the output is pure text).
+
+    If `stats` is provided, the final message's Ollama timing fields are written into
+    it (durations in nanoseconds) so callers can record latency/throughput metrics.
+    """
     payload = {
         "model": settings.ollama_model,
         "messages": messages,
@@ -161,6 +210,8 @@ async def _stream_ollama_response(messages: list[dict]) -> AsyncGenerator[str, N
                     if token:
                         yield token
                     if data.get("done"):
+                        if stats is not None:
+                            stats.update(data)
                         break
         except Exception as e:
             yield f"\n\n[Fehler beim Streaming: {e}]"

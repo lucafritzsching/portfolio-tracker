@@ -6,7 +6,7 @@ export function useFormatters() {
     n != null ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` : '–'
 
   const fmtCurrency = (n: number | null | undefined) =>
-    n != null ? `€ ${fmt(n)}` : '–'
+    n != null ? `$ ${fmt(n)}` : '–'
 
   const fmtDate = (d: string | null | undefined) => {
     if (!d) return '–'

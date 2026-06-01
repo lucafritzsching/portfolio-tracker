@@ -81,17 +81,17 @@ async function removePosition(ticker: string) {
       <div class="grid-4" style="margin: 14px 0">
         <div class="metric-card">
           <div class="metric-label">Kurs</div>
-          <div class="metric-value" style="font-size: 16px">€ {{ pos.current_price != null ? fmt(pos.current_price) : '–' }}</div>
+          <div class="metric-value" style="font-size: 16px">$ {{ pos.current_price != null ? fmt(pos.current_price) : '–' }}</div>
           <div class="metric-sub" :class="(pos.day_change ?? 0) >= 0 ? 'positive' : 'negative'">{{ fmtPct(pos.day_change) }} heute</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Anzahl</div>
           <div class="metric-value" style="font-size: 16px">{{ pos.shares }}</div>
-          <div class="metric-sub">Ø Kauf: {{ pos.avg_buy_price != null ? `€ ${fmt(pos.avg_buy_price)}` : '–' }}</div>
+          <div class="metric-sub">Ø Kauf: {{ pos.avg_buy_price != null ? `$ ${fmt(pos.avg_buy_price)}` : '–' }}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Wert</div>
-          <div class="metric-value" style="font-size: 16px">€ {{ pos.current_price != null ? fmt(pos.current_price * pos.shares) : '–' }}</div>
+          <div class="metric-value" style="font-size: 16px">$ {{ pos.current_price != null ? fmt(pos.current_price * pos.shares) : '–' }}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Rendite</div>
@@ -99,7 +99,7 @@ async function removePosition(ticker: string) {
             {{ pos.unrealized_pnl_pct != null ? fmtPct(pos.unrealized_pnl_pct) : '–' }}
           </div>
           <div class="metric-sub" :class="(pos.unrealized_pnl ?? 0) >= 0 ? 'positive' : 'negative'">
-            {{ pos.unrealized_pnl != null ? `€ ${fmt(pos.unrealized_pnl)}` : '' }}
+            {{ pos.unrealized_pnl != null ? `$ ${fmt(pos.unrealized_pnl)}` : '' }}
           </div>
         </div>
       </div>
@@ -127,10 +127,10 @@ async function removePosition(ticker: string) {
               <td>{{ fmtDate(tx.date) }}</td>
               <td><span class="badge" :class="tx.type === 'buy' ? 'badge-buy' : 'badge-sell'">{{ tx.type === 'buy' ? 'Kauf' : 'Verkauf' }}</span></td>
               <td>{{ tx.shares }}</td>
-              <td>€ {{ fmt(tx.price) }}</td>
-              <td>€ {{ fmt(tx.shares * tx.price) }}</td>
+              <td>$ {{ fmt(tx.price) }}</td>
+              <td>$ {{ fmt(tx.shares * tx.price) }}</td>
               <td :class="tx.realized_pnl != null ? (tx.realized_pnl >= 0 ? 'positive' : 'negative') : ''">
-                {{ tx.realized_pnl != null ? `€ ${fmt(tx.realized_pnl)}` : '–' }}
+                {{ tx.realized_pnl != null ? `$ ${fmt(tx.realized_pnl)}` : '–' }}
               </td>
             </tr>
           </tbody>
@@ -155,7 +155,7 @@ async function removePosition(ticker: string) {
             <input v-model="txForm.shares" class="form-input" type="number" step="0.0001" placeholder="0" />
           </div>
           <div class="form-group">
-            <label class="form-label">Kurs (€)</label>
+            <label class="form-label">Kurs ($)</label>
             <input v-model="txForm.price" class="form-input" type="number" step="0.01" placeholder="0.00" />
           </div>
         </div>

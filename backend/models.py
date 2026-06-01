@@ -121,3 +121,34 @@ class AnalysisResult(Base):
     analysis_text: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AnalysisMetric(Base):
+    """One row per agent analysis run — used to track & evaluate agent performance.
+
+    Captures the deterministic decision, the LLM latency/throughput (from Ollama's
+    own timing fields) and an automated faithfulness check of the explanation text.
+    """
+    __tablename__ = "analysis_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Deterministic decision snapshot
+    signal: Mapped[str] = mapped_column(String(8), nullable=False)  # BUY / HOLD / SELL
+    score: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+
+    # LLM performance (from Ollama timing fields)
+    total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    load_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eval_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_per_sec: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+
+    # Explanation faithfulness check
+    faithful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    faithfulness_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.data_science import compute_ensemble, EnsembleDecision
+from agent.data_science import compute_ensemble, calculate_technical_indicators, EnsembleDecision
 from agent.sentiment import score_sentiment_llm
 from models import Position, Transaction
 from services.market_data import (
@@ -28,6 +28,8 @@ def _fundamentals_to_dict(obj) -> dict | None:
         "market_cap": float(obj.market_cap) if obj.market_cap is not None else None,
         "eps": float(obj.eps) if obj.eps is not None else None,
         "beta": float(obj.beta) if obj.beta is not None else None,
+        "fifty_two_week_high": float(obj.fifty_two_week_high) if obj.fifty_two_week_high is not None else None,
+        "fifty_two_week_low": float(obj.fifty_two_week_low) if obj.fifty_two_week_low is not None else None,
     }
 
 
@@ -87,6 +89,49 @@ async def compute_portfolio_context(ticker: str, db: AsyncSession, current_price
     }
 
 
+async def build_portfolio_snapshot(db: AsyncSession, current_prices: dict[str, float]) -> dict:
+    """Compact, LLM-friendly overview of the whole portfolio.
+
+    Uses only the cheap technical indicators (RSI, trend) — no ARIMA/Random-Forest —
+    so it is fast enough to power interactive chat/rebalancing on every request.
+    """
+    positions = (await db.execute(select(Position))).scalars().all()
+    total_value = sum(current_prices.get(p.ticker, 0) * float(p.shares) for p in positions)
+
+    rows_out = []
+    sector_value: dict[str, float] = {}
+    for pos in positions:
+        price_rows = await fetch_and_store_prices(pos.ticker, db)  # cached, no refetch if fresh
+        ind = calculate_technical_indicators(prices_to_dicts(price_rows))
+        ctx = await compute_portfolio_context(pos.ticker, db, current_prices)
+        value = (current_prices.get(pos.ticker) or 0) * float(pos.shares)
+        sector_value[pos.sector] = sector_value.get(pos.sector, 0) + value
+        rows_out.append({
+            "ticker": pos.ticker,
+            "name": pos.name,
+            "sector": pos.sector,
+            "shares": float(pos.shares),
+            "current_price": current_prices.get(pos.ticker),
+            "avg_buy_price": ctx.get("avg_buy_price") if ctx else None,
+            "pnl_pct": ctx.get("unrealized_pnl_pct") if ctx else None,
+            "weight_pct": round(value / total_value * 100, 1) if total_value > 0 else None,
+            "rsi": round(ind.rsi_14, 1) if ind.rsi_14 is not None else None,
+            "trend": ind.trend_signal,
+        })
+
+    sector_weights = {
+        s: round(v / total_value * 100, 1) for s, v in sector_value.items()
+    } if total_value > 0 else {}
+
+    return {
+        "total_value": round(total_value, 2),
+        "currency": "USD",
+        "position_count": len(positions),
+        "sector_weights_pct": sector_weights,
+        "positions": rows_out,
+    }
+
+
 async def build_ensemble_decision(
     ticker: str, db: AsyncSession, current_prices: dict[str, float], force: bool = False
 ) -> tuple[EnsembleDecision, dict]:
@@ -94,8 +139,17 @@ async def build_ensemble_decision(
     prices, fundamentals, news_sentiment, _news = await gather_market_data(ticker, db, force=force)
     portfolio_ctx = await compute_portfolio_context(ticker, db, current_prices)
     decision = compute_ensemble(prices, fundamentals, news_sentiment, portfolio_ctx)
+
+    # Indicators are based on the last stored daily close; prefer the LIVE intraday price
+    # for what the LLM reports as "current price" (the close can be days old).
+    live_price = current_prices.get(ticker.upper())
+    if live_price and decision.technicals:
+        decision.technicals["current_price"] = round(float(live_price), 2)
+        decision.technicals["current_price_hinweis"] = "Live-Kurs; SMA/Bollinger/RSI/MACD basieren auf dem letzten Tagesschluss"
+
     context = {
         "fundamentals": fundamentals,
+        "technicals": decision.technicals,  # concrete price levels for data-driven entry/exit marks
         "news_sentiment": news_sentiment,
         "portfolio": portfolio_ctx,
         "price_points": len(prices),

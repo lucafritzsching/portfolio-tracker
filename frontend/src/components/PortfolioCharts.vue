@@ -36,7 +36,7 @@ function renderCharts() {
         callbacks: {
           label: (ctx: any) => {
             const pct = (ctx.raw / totalValue * 100).toFixed(1)
-            return ` ${ctx.label}: €${ctx.raw.toFixed(0)} (${pct}%)`
+            return ` ${ctx.label}: $${ctx.raw.toFixed(0)} (${pct}%)`
           }
         }
       }},

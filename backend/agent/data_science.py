@@ -51,6 +51,7 @@ class EnsembleDecision:
     confidence: float    # [0, 1]
     components: dict      # name -> {value, weight, contribution}
     rationale: list[str]  # human-readable German bullet points
+    technicals: dict | None = None  # concrete price levels (SMA, Bollinger, ARIMA target) for grounding
 
 
 def calculate_technical_indicators(prices: list[dict]) -> TechnicalIndicators:
@@ -100,8 +101,14 @@ def calculate_technical_indicators(prices: list[dict]) -> TechnicalIndicators:
 
     bullish_signals = 0
     bearish_signals = 0
-    if rsi_val and rsi_val > 50: bullish_signals += 1
-    if rsi_val and rsi_val < 50: bearish_signals += 1
+    # RSI by zone: >70 overbought (caution → bearish), <30 oversold (rebound → bullish),
+    # 50–70 bullish momentum, 30–50 bearish momentum. Avoids reading an extreme
+    # reading like RSI 84 as a strong buy, which is the classic overbought trap.
+    if rsi_val is not None:
+        if rsi_val > 70 or (30 <= rsi_val <= 50):
+            bearish_signals += 1
+        elif rsi_val < 30 or rsi_val > 50:
+            bullish_signals += 1
     if macd_val > 0: bullish_signals += 1
     if macd_val < 0: bearish_signals += 1
     if hist_val > 0: bullish_signals += 1
@@ -297,6 +304,19 @@ def run_ml_signal(prices: list[dict]) -> ModelForecast:
         )
 
 
+def _rsi_zone(rsi: float | None) -> str:
+    """Human-readable RSI zone for the German rationale."""
+    if rsi is None:
+        return ""
+    if rsi > 70:
+        return "überkauft"
+    if rsi < 30:
+        return "überverkauft"
+    if rsi > 50:
+        return "bullishe Dynamik"
+    return "bearishe Dynamik"
+
+
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
@@ -370,6 +390,13 @@ def compute_ensemble(
 
     # Sub-scores in [-1, 1]; ARIMA/RF additionally scaled by their own confidence.
     tech_sub = _signal_to_score(indicators.trend_signal)
+    # Overbought/oversold dampening: an extreme RSI makes the trend less reliable, so
+    # temper the conviction (a bullish trend at RSI 84 is not a full-strength buy).
+    if indicators.rsi_14 is not None:
+        if indicators.trend_signal == "BULLISH" and indicators.rsi_14 > 70:
+            tech_sub *= 0.6
+        elif indicators.trend_signal == "BEARISH" and indicators.rsi_14 < 30:
+            tech_sub *= 0.6
     arima_sub = _signal_to_score(arima.signal) * (arima.confidence if arima.confidence else 0.5)
     ml_sub = _signal_to_score(ml.signal) * (ml.confidence if ml.confidence else 0.5)
     fund_sub, fund_notes = _fundamental_tilt(fundamentals)
@@ -390,8 +417,28 @@ def compute_ensemble(
         score += contribution
         components[name] = {"value": round(sub, 3), "weight": weight, "contribution": round(contribution, 3)}
 
-    rationale.append(f"Technischer Trend: {indicators.trend_signal} (RSI {indicators.rsi_14:.0f})"
-                     if indicators.rsi_14 is not None else f"Technischer Trend: {indicators.trend_signal}")
+    # Trend line names the drivers (price vs SMA200, MACD) — deliberately WITHOUT the
+    # RSI, so it isn't read as part of the bull/bear case.
+    drivers = []
+    if indicators.price_vs_sma200 is not None:
+        drivers.append(f"Preis {indicators.price_vs_sma200:+.0f}% ggü. SMA200")
+    if indicators.macd is not None:
+        drivers.append("MACD positiv" if indicators.macd > 0 else "MACD negativ")
+    trend_line = f"Technischer Trend: {indicators.trend_signal}"
+    if drivers:
+        trend_line += " – getragen von " + ", ".join(drivers)
+    rationale.append(trend_line)
+
+    # RSI is reported separately as its own (counter-)signal — with the nuance that a
+    # high reading means strong momentum AND elevated correction risk (not purely negative).
+    if indicators.rsi_14 is not None:
+        zone = _rsi_zone(indicators.rsi_14)
+        warn = ""
+        if indicators.rsi_14 > 70:
+            warn = " → starkes Momentum, aber erhöhtes Risiko kurzfristiger Gewinnmitnahmen/Korrektur"
+        elif indicators.rsi_14 < 30:
+            warn = " → schwaches Momentum, mögliche Erholung/Nachkaufzone"
+        rationale.append(f"RSI {indicators.rsi_14:.0f} ({zone}){warn}")
     rationale.append(f"ARIMA 30-Tage-Signal: {arima.signal}"
                      + (f" (Konfidenz {arima.confidence:.0%})" if arima.confidence else ""))
     rationale.append(f"RandomForest-Signal: {ml.signal}"
@@ -430,10 +477,51 @@ def compute_ensemble(
     agreement = (sum(1 for d in nonzero if d == direction) / len(nonzero)) if nonzero else 0.0
     confidence = max(0.05, min(0.95, 0.5 * min(1.0, abs(score) / 0.5) + 0.5 * agreement))
 
+    # Concrete price levels so the LLM can DERIVE entry/exit marks from data
+    # (support/resistance, moving averages, forecast target) instead of guessing.
+    def _r(x):
+        return round(x, 2) if isinstance(x, (int, float)) else None
+
+    # Pre-interpret the price-vs-moving-average structure so the LLM states the HOLD
+    # condition correctly (e.g. "above both SMAs" instead of the nonsensical "between" them).
+    cp = indicators.current_price
+    ma_structure = None
+    if cp and indicators.sma_50 and indicators.sma_200:
+        if cp > indicators.sma_50 and cp > indicators.sma_200:
+            ma_structure = "Kurs über SMA50 und SMA200 → langfristiger Aufwärtstrend intakt (Halten gerechtfertigt, solange der Kurs darüber bleibt)"
+        elif cp < indicators.sma_50 and cp < indicators.sma_200:
+            ma_structure = "Kurs unter SMA50 und SMA200 → Abwärtstrend"
+        else:
+            ma_structure = "Kurs zwischen SMA50 und SMA200 → uneinheitliches Trendbild"
+
+    # MACD vs its signal line, pre-interpreted so the LLM states the momentum direction correctly.
+    macd_lage = None
+    if indicators.macd is not None and indicators.macd_signal is not None:
+        if indicators.macd > indicators.macd_signal:
+            macd_lage = "MACD über Signallinie → bullishes Momentum"
+        else:
+            macd_lage = "MACD unter Signallinie → bearishes Momentum (Verkaufssignal)"
+
+    technicals = {
+        "current_price": _r(indicators.current_price),
+        "sma_50": _r(indicators.sma_50),
+        "sma_200": _r(indicators.sma_200),
+        "trend_struktur": ma_structure,
+        "bollinger_upper": _r(indicators.bb_upper),
+        "bollinger_lower": _r(indicators.bb_lower),
+        "arima_forecast_7d": arima.forecast_7d,
+        "arima_forecast_30d": arima.forecast_30d,
+        "rsi_14": _r(indicators.rsi_14),
+        "macd": _r(indicators.macd),
+        "macd_signal_line": _r(indicators.macd_signal),
+        "macd_lage": macd_lage,
+    }
+
     return EnsembleDecision(
         signal=signal,
         score=round(score, 3),
         confidence=round(confidence, 2),
         components=components,
         rationale=rationale,
+        technicals=technicals,
     )

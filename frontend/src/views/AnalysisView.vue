@@ -3,10 +3,12 @@ import { ref, onMounted } from 'vue'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { api } from '@/api/client'
 import { useFormatters } from '@/composables/useFormatters'
+import { useMarkdown } from '@/composables/useMarkdown'
 import type { AgentStatus } from '@/types'
 
 const portfolio = usePortfolioStore()
 const { fmt, fmtPct } = useFormatters()
+const md = useMarkdown()
 
 const agentStatus = ref<AgentStatus | null>(null)
 const statusLoading = ref(false)
@@ -176,7 +178,7 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
           {{ portfolioAnalysisRunning ? 'Analysiere...' : 'Portfolio analysieren' }}
         </button>
       </div>
-      <div v-if="portfolioAnalysis" class="ai-box">{{ portfolioAnalysis }}</div>
+      <div v-if="portfolioAnalysis" class="ai-box markdown" v-html="md.render(portfolioAnalysis)"></div>
       <div v-else-if="portfolioAnalysisRunning" class="ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
         <span class="spinner" /> Agent sammelt Daten...
       </div>
@@ -204,7 +206,7 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
         </div>
         <div style="display: flex; gap: 16px; align-items: center; font-size: 13px">
           <span>
-            Kurs: <strong>€ {{ pos.current_price != null ? fmt(pos.current_price) : '–' }}</strong>
+            Kurs: <strong>$ {{ pos.current_price != null ? fmt(pos.current_price) : '–' }}</strong>
           </span>
           <span v-if="pos.unrealized_pnl_pct != null" :class="pos.unrealized_pnl_pct >= 0 ? 'positive' : 'negative'">
             {{ fmtPct(pos.unrealized_pnl_pct) }}
@@ -221,8 +223,8 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
       </div>
 
       <template v-if="analysisText[pos.ticker]">
-        <div class="ai-box decision-box">{{ splitAnalysis(analysisText[pos.ticker]).decision }}</div>
-        <div v-if="splitAnalysis(analysisText[pos.ticker]).agent" class="ai-box" style="margin-top: 10px">{{ splitAnalysis(analysisText[pos.ticker]).agent }}</div>
+        <div class="ai-box decision-box markdown" v-html="md.render(splitAnalysis(analysisText[pos.ticker] || '').decision)"></div>
+        <div v-if="splitAnalysis(analysisText[pos.ticker] || '').agent" class="ai-box markdown" style="margin-top: 10px" v-html="md.render(splitAnalysis(analysisText[pos.ticker] || '').agent)"></div>
       </template>
       <div v-else-if="analysisRunning[pos.ticker]" class="ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
         <span class="spinner" /> Agent läuft: sammelt Daten, berechnet das Ensemble, begründet die Entscheidung...
@@ -234,5 +236,35 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
 <style scoped>
 .decision-box {
   border-left: 3px solid var(--blue);
+}
+
+/* Rendered Markdown (agent analysis) — overrides the raw pre-wrap of .ai-box */
+.markdown { white-space: normal; }
+.markdown :deep(h3) {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 18px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.markdown :deep(h3:first-child) { margin-top: 0; }
+.markdown :deep(h4) {
+  font-size: 13.5px;
+  font-weight: 700;
+  margin: 14px 0 6px;
+  color: var(--blue);
+}
+.markdown :deep(h5) { font-size: 13px; font-weight: 700; margin: 10px 0 4px; }
+.markdown :deep(p) { margin: 6px 0; }
+.markdown :deep(ul) { margin: 6px 0 6px; padding-left: 18px; }
+.markdown :deep(li) { margin: 4px 0; padding-left: 2px; }
+.markdown :deep(li)::marker { color: var(--blue); }
+.markdown :deep(strong) { color: var(--text-primary); font-weight: 700; }
+.markdown :deep(em) { color: var(--text-secondary); }
+.markdown :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
 }
 </style>

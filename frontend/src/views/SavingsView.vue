@@ -62,7 +62,7 @@ async function execute(id: number) {
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px">
         <div>
           <span style="font-size: 16px; font-weight: 700">{{ plan.ticker }}</span>
-          <span style="color: var(--text-secondary); margin-left: 10px">€ {{ fmt(plan.monthly_amount) }}/Monat</span>
+          <span style="color: var(--text-secondary); margin-left: 10px">$ {{ fmt(plan.monthly_amount) }}/Monat</span>
           <span class="badge badge-blue" style="margin-left: 8px">Am {{ plan.execution_day }}. jeden Monats</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
@@ -81,9 +81,9 @@ async function execute(id: number) {
           <tbody>
             <tr v-for="h in [...plan.history].reverse()" :key="h.id">
               <td>{{ fmtDate(h.date) }}</td>
-              <td>€ {{ fmt(h.amount) }}</td>
+              <td>$ {{ fmt(h.amount) }}</td>
               <td>{{ h.shares }}</td>
-              <td>€ {{ fmt(h.price) }}</td>
+              <td>$ {{ fmt(h.price) }}</td>
             </tr>
           </tbody>
         </table>
@@ -100,7 +100,7 @@ async function execute(id: number) {
         </div>
         <div class="grid-2">
           <div class="form-group">
-            <label class="form-label">Monatlicher Betrag (€) *</label>
+            <label class="form-label">Monatlicher Betrag ($) *</label>
             <input v-model="form.monthly_amount" class="form-input" type="number" step="1" placeholder="100" />
           </div>
           <div class="form-group">

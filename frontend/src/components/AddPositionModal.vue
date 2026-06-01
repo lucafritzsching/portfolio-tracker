@@ -100,7 +100,7 @@ async function submit() {
           <input v-model="form.shares" class="form-input" type="number" step="0.0001" placeholder="0" />
         </div>
         <div class="form-group">
-          <label class="form-label">Kaufkurs (€)</label>
+          <label class="form-label">Kaufkurs ($)</label>
           <input v-model="form.buyPrice" class="form-input" type="number" step="0.01" placeholder="0.00" />
         </div>
       </div>
