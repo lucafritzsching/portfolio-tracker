@@ -2,6 +2,30 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
+## Coding Guidelines
+
+### 1. Think Before Coding
+- **State assumptions explicitly:** Before implementing, list your interpretation of the task. If uncertain, ask for clarification rather than guessing.
+- **Surface tradeoffs:** If multiple paths exist, present them briefly before choosing one.
+- **Push back:** If a request is likely to lead to bad architecture or unnecessary complexity, suggest a simpler alternative.
+- **Stop on confusion:** If you find yourself "guessing" through a problem, stop and name exactly what is unclear.
+
+### 2. Simplicity First
+- **Minimalism:** Write the minimum amount of code required to solve the problem.
+- **No speculative features:** Do not add "flexibility," "configurability," or abstractions for future use cases that weren't requested.
+- **Prefer 100 lines over 1000:** If a solution can be implemented directly in 100 lines, do not build a 1000-line framework around it.
+- **Avoid abstractions:** Do not create interfaces or wrappers for single-use code.
+
+### 3. Surgical Changes
+- **Stay in scope:** Touch only the files and lines strictly necessary for the task.
+- **No orthogonal edits:** Do not "clean up" unrelated code, change comments, or reformat files unless explicitly asked.
+- **Clean your own mess:** Only refactor code that you are actively modifying to fulfill the goal.
+
+### 4. Goal-Driven Execution
+- **Verifiable goals:** Transform vague tasks into testable outcomes (e.g., "Fix bug" → "Create reproduction test, then make it pass").
+- **Test-first mindset:** Whenever possible, write or run a test to verify a change before declaring it finished.
+- **Loop until verified:** Do not assume a fix works because the code "looks right." Use the terminal to confirm.
+
 ## Full Documentation
 
 Human- and agent-facing docs live in [`docs/`](docs/README.md) (German). Start there for the *why*:
