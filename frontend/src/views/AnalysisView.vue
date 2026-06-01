@@ -18,6 +18,11 @@ const portfolioAnalysis = ref('')
 const portfolioAnalysisRunning = ref(false)
 const pullingModel = ref(false)
 const pullLog = ref('')
+const agenticMode = ref(false)
+const newsSummary = ref<Record<string, string>>({})
+const newsSummaryRunning = ref<Record<string, boolean>>({})
+const rebalanceText = ref('')
+const rebalanceRunning = ref(false)
 
 onMounted(checkAgentStatus)
 
@@ -59,7 +64,7 @@ function analyzeStock(ticker: string) {
   analysisRunning.value[ticker] = true
   analysisText.value[ticker] = ''
 
-  const source = api.agent.analyzeStock(ticker, portfolio.currentPrices)
+  const source = api.agent.analyzeStock(ticker, portfolio.currentPrices, agenticMode.value)
   source.onmessage = (e) => {
     if (e.data === '[DONE]') {
       analysisRunning.value[ticker] = false
@@ -73,6 +78,38 @@ function analyzeStock(ticker: string) {
     analysisRunning.value[ticker] = false
     source.close()
     if (!analysisText.value[ticker]) analysisText.value[ticker] = '[Verbindungsfehler zum Agenten]'
+  }
+}
+
+function summarizeNews(ticker: string) {
+  if (newsSummaryRunning.value[ticker]) return
+  newsSummaryRunning.value[ticker] = true
+  newsSummary.value[ticker] = ''
+  const source = api.agent.newsSummary(ticker)
+  source.onmessage = (e) => {
+    if (e.data === '[DONE]') { newsSummaryRunning.value[ticker] = false; source.close(); return }
+    newsSummary.value[ticker] = (newsSummary.value[ticker] || '') + e.data.replace(/\\n/g, '\n')
+  }
+  source.onerror = () => {
+    newsSummaryRunning.value[ticker] = false
+    source.close()
+    if (!newsSummary.value[ticker]) newsSummary.value[ticker] = '[Verbindungsfehler zum Agenten]'
+  }
+}
+
+function runRebalance() {
+  if (rebalanceRunning.value) return
+  rebalanceRunning.value = true
+  rebalanceText.value = ''
+  const source = api.agent.rebalance(portfolio.currentPrices)
+  source.onmessage = (e) => {
+    if (e.data === '[DONE]') { rebalanceRunning.value = false; source.close(); return }
+    rebalanceText.value += e.data.replace(/\\n/g, '\n')
+  }
+  source.onerror = () => {
+    rebalanceRunning.value = false
+    source.close()
+    if (!rebalanceText.value) rebalanceText.value = '[Verbindungsfehler zum Agenten]'
   }
 }
 
@@ -169,14 +206,24 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
     <div class="card" style="margin-bottom: 20px">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px">
         <h2 class="section-title" style="margin: 0">Portfolio-Analyse</h2>
-        <button
-          class="btn btn-primary"
-          @click="analyzePortfolio"
-          :disabled="portfolioAnalysisRunning || !agentStatus?.ollama_reachable"
-        >
-          <span v-if="portfolioAnalysisRunning" class="spinner" />
-          {{ portfolioAnalysisRunning ? 'Analysiere...' : 'Portfolio analysieren' }}
-        </button>
+        <div style="display: flex; gap: 8px">
+          <button
+            class="btn btn-sm"
+            @click="runRebalance"
+            :disabled="rebalanceRunning || !agentStatus?.ollama_reachable || portfolio.positions.length === 0"
+            title="KI-Vorschläge zur Diversifikation / Umschichtung"
+          >
+            <span v-if="rebalanceRunning" class="spinner" /> ⚖️ Rebalancing-Vorschläge
+          </button>
+          <button
+            class="btn btn-primary"
+            @click="analyzePortfolio"
+            :disabled="portfolioAnalysisRunning || !agentStatus?.ollama_reachable"
+          >
+            <span v-if="portfolioAnalysisRunning" class="spinner" />
+            {{ portfolioAnalysisRunning ? 'Analysiere...' : 'Portfolio analysieren' }}
+          </button>
+        </div>
       </div>
       <div v-if="portfolioAnalysis" class="ai-box markdown" v-html="md.render(portfolioAnalysis)"></div>
       <div v-else-if="portfolioAnalysisRunning" class="ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
@@ -185,11 +232,21 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
       <p v-else style="color: var(--text-tertiary); font-size: 13px">
         Klicke auf "Portfolio analysieren" um eine KI-Gesamtanalyse zu starten. Der Agent führt einen vollständigen Data-Science-Prozess durch.
       </p>
+      <div v-if="rebalanceText" class="ai-box markdown" style="margin-top: 12px; border-left: 3px solid var(--amber)" v-html="md.render(rebalanceText)"></div>
+      <div v-else-if="rebalanceRunning" class="ai-box" style="margin-top: 12px; display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
+        <span class="spinner" /> Erstelle Rebalancing-Vorschläge...
+      </div>
     </div>
 
     <!-- Individual Stock Analyses -->
-    <h2 class="section-title">Einzelanalysen</h2>
-    <div v-if="portfolio.positions.length === 0" style="color: var(--text-tertiary); font-size: 13px">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px">
+      <h2 class="section-title" style="margin: 0">Einzelanalysen</h2>
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer" title="Der Agent ruft sichtbar selbst Tools auf (langsamer)">
+        <input type="checkbox" v-model="agenticMode" />
+        Agent-Modus (mit Tool-Recherche)
+      </label>
+    </div>
+    <div v-if="portfolio.positions.length === 0" style="color: var(--text-tertiary); font-size: 13px; margin-top: 12px">
       Keine Positionen im Portfolio.
     </div>
     <div
@@ -212,6 +269,14 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
             {{ fmtPct(pos.unrealized_pnl_pct) }}
           </span>
           <button
+            class="btn btn-sm"
+            @click="summarizeNews(pos.ticker)"
+            :disabled="newsSummaryRunning[pos.ticker] || !agentStatus?.ollama_reachable"
+            title="KI-Zusammenfassung der aktuellen News"
+          >
+            <span v-if="newsSummaryRunning[pos.ticker]" class="spinner" /> 📰 News
+          </button>
+          <button
             class="btn btn-sm btn-primary"
             @click="analyzeStock(pos.ticker)"
             :disabled="analysisRunning[pos.ticker] || !agentStatus?.ollama_reachable"
@@ -228,6 +293,11 @@ function splitAnalysis(text: string): { decision: string; agent: string } {
       </template>
       <div v-else-if="analysisRunning[pos.ticker]" class="ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
         <span class="spinner" /> Agent läuft: sammelt Daten, berechnet das Ensemble, begründet die Entscheidung...
+      </div>
+
+      <div v-if="newsSummary[pos.ticker]" class="ai-box markdown" style="margin-top: 10px; border-left: 3px solid var(--text-tertiary)" v-html="md.render(newsSummary[pos.ticker] || '')"></div>
+      <div v-else-if="newsSummaryRunning[pos.ticker]" class="ai-box" style="margin-top: 10px; display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
+        <span class="spinner" /> Fasse News zusammen...
       </div>
     </div>
   </div>

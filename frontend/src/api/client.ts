@@ -79,14 +79,27 @@ export const api = {
     status: () => request<AgentStatus>('/agent/status'),
     pullModel: () => fetch(`${BASE}/agent/pull-model`, { method: 'POST' }),
 
-    analyzeStock: (ticker: string, currentPrices: Record<string, number>): EventSource => {
+    analyzeStock: (ticker: string, currentPrices: Record<string, number>, agentic = false): EventSource => {
       const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/analyze/${ticker}?current_prices=${pricesParam}`)
+      return new EventSource(`${BASE}/agent/analyze/${ticker}?current_prices=${pricesParam}&agentic=${agentic}`)
     },
 
     analyzePortfolio: (currentPrices: Record<string, number>): EventSource => {
       const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
       return new EventSource(`${BASE}/agent/analyze-portfolio?current_prices=${pricesParam}`)
+    },
+
+    chat: (question: string, currentPrices: Record<string, number>): EventSource => {
+      const p = encodeURIComponent(JSON.stringify(currentPrices))
+      return new EventSource(`${BASE}/agent/chat?question=${encodeURIComponent(question)}&current_prices=${p}`)
+    },
+
+    newsSummary: (ticker: string): EventSource =>
+      new EventSource(`${BASE}/agent/news-summary/${ticker}`),
+
+    rebalance: (currentPrices: Record<string, number>): EventSource => {
+      const p = encodeURIComponent(JSON.stringify(currentPrices))
+      return new EventSource(`${BASE}/agent/rebalance?current_prices=${p}`)
     },
   },
 

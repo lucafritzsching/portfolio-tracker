@@ -3,7 +3,10 @@ import json
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from database import AsyncSessionLocal
-from agent.orchestrator import analyze_stock_stream, analyze_portfolio_stream
+from agent.orchestrator import (
+    analyze_stock_stream, analyze_portfolio_stream,
+    chat_stream, news_summary_stream, rebalance_stream,
+)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -26,6 +29,7 @@ def _parse_prices(current_prices: str) -> dict:
 async def analyze_stock(
     ticker: str,
     current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
+    agentic: bool = Query(False, description="If true, the LLM investigates via tools (slower, visible)."),
 ):
     """Stream Ollama agent analysis for a single stock via SSE."""
     prices = _parse_prices(current_prices)
@@ -33,7 +37,7 @@ async def analyze_stock(
     async def event_stream():
         async with AsyncSessionLocal() as db:
             try:
-                async for chunk in analyze_stock_stream(ticker.upper(), db, prices):
+                async for chunk in analyze_stock_stream(ticker.upper(), db, prices, agentic=agentic):
                     # SSE data lines can't contain raw newlines; escape them.
                     escaped = chunk.replace("\n", "\\n")
                     yield f"data: {escaped}\n\n"
@@ -64,6 +68,45 @@ async def analyze_portfolio(
                 yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+def _sse(stream_factory):
+    """Wrap an async chunk generator factory into an SSE event stream with its own DB session."""
+    async def event_stream():
+        async with AsyncSessionLocal() as db:
+            try:
+                async for chunk in stream_factory(db):
+                    yield f"data: {chunk.replace(chr(10), chr(92) + 'n')}\n\n"
+            except Exception as e:
+                yield f"data: [FEHLER: {e}]\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.get("/chat")
+async def chat(
+    question: str = Query(..., description="Frage des Nutzers zum Portfolio"),
+    current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
+):
+    """GenAI: free-text Q&A about the portfolio, grounded in a live snapshot (SSE)."""
+    prices = _parse_prices(current_prices)
+    return _sse(lambda db: chat_stream(question, db, prices))
+
+
+@router.get("/news-summary/{ticker}")
+async def news_summary(ticker: str):
+    """GenAI: summarize the latest news for a ticker into themes + risks (SSE)."""
+    return _sse(lambda db: news_summary_stream(ticker.upper(), db))
+
+
+@router.get("/rebalance")
+async def rebalance(
+    current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
+):
+    """GenAI: diversification analysis + rebalancing suggestions (SSE)."""
+    prices = _parse_prices(current_prices)
+    return _sse(lambda db: rebalance_stream(db, prices))
 
 
 @router.get("/status")

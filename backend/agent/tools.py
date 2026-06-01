@@ -30,7 +30,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ticker": {"type": "string", "description": "Ticker-Symbol, z.B. AAPL"},
+                    "ticker": {"type": "string", "description": "Börsen-Ticker-Symbol des Unternehmens"},
                     "period": {"type": "string", "enum": ["1mo", "3mo", "6mo", "1y", "2y"], "description": "Zeitraum"},
                 },
                 "required": ["ticker"],

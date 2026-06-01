@@ -12,6 +12,7 @@ const navItems: { id: View; label: string }[] = [
   { id: 'savings', label: 'Sparpläne' },
   { id: 'news', label: 'News' },
   { id: 'analysis', label: 'KI-Analyse' },
+  { id: 'chat', label: 'KI-Chat' },
   { id: 'eval', label: 'Eval' },
 ]
 </script>

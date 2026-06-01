@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.data_science import EnsembleDecision
 from agent.pipeline import build_ensemble_decision, build_portfolio_snapshot
+from agent.tools import TOOL_DEFINITIONS, ToolExecutor
 from agent.prompts import (
     SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT,
     CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT, NEWS_SUMMARY_PROMPT, REBALANCE_PROMPT,
@@ -68,8 +69,14 @@ async def analyze_stock_stream(
     ticker: str,
     db: AsyncSession,
     current_prices: dict[str, float],
+    agentic: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Stream a single-stock analysis: deterministic decision first, then LLM explanation."""
+    """Stream a single-stock analysis: deterministic decision first, then LLM explanation.
+
+    agentic=False (default): the explanation streams directly from the pre-gathered context (fast).
+    agentic=True: the LLM investigates via tools first (visible in the UI), then explains — slower
+    but demonstrates autonomous agent behaviour.
+    """
     ticker = ticker.upper()
 
     # Phase 1 + 2: deterministic data collection and decision.
@@ -99,14 +106,107 @@ async def analyze_stock_stream(
 
     stats: dict = {}
     explanation = ""
-    async for chunk in _stream_ollama_response(messages, stats):
-        explanation += chunk
-        full_response += chunk
-        yield chunk
+    if agentic:
+        executor = ToolExecutor(db=db, current_prices=current_prices)
+        async for chunk in _run_agent_loop(messages, executor, stats):
+            explanation += chunk
+            full_response += chunk
+            yield chunk
+    else:
+        async for chunk in _stream_ollama_response(messages, stats):
+            explanation += chunk
+            full_response += chunk
+            yield chunk
 
     db.add(AnalysisResult(ticker=ticker, analysis_text=full_response, model=settings.ollama_model))
     await _record_metric(db, ticker, decision, explanation, stats)
     await db.commit()
+
+
+MAX_TOOL_ITERATIONS = 5
+
+
+async def _run_agent_loop(
+    messages: list[dict], executor: ToolExecutor, stats: dict | None = None, show_tools: bool = True
+) -> AsyncGenerator[str, None]:
+    """Tool-use loop: the LLM may call tools; the final answer is streamed.
+
+    show_tools=True surfaces each tool call as a visible line (used in the analysis view);
+    show_tools=False keeps them hidden so only the final answer is shown (used in chat).
+    """
+    iteration = 0
+    while iteration < MAX_TOOL_ITERATIONS:
+        iteration += 1
+        is_last = iteration >= MAX_TOOL_ITERATIONS
+        payload = {
+            "model": settings.ollama_model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "tools": TOOL_DEFINITIONS if not is_last else [],
+            "options": {"temperature": 0.3},
+        }
+        async with httpx.AsyncClient(timeout=180) as client:
+            try:
+                resp = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                yield f"\n\n[Fehler bei Ollama-Anfrage: {e}]"
+                return
+
+        message = data.get("message", {})
+        tool_calls = message.get("tool_calls", [])
+        if not tool_calls:
+            # Fallback: qwen3 sometimes emits tool calls as plain-text JSON in the content
+            # instead of the structured tool_calls field. Recover them so the loop still works.
+            tool_calls = _extract_text_tool_calls(message.get("content", ""))
+        if not tool_calls:
+            async for token in _stream_ollama_response(messages, stats):
+                yield token
+            return
+
+        messages.append({"role": "assistant", "content": message.get("content", ""), "tool_calls": tool_calls})
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            arguments = fn.get("arguments", {})
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+            if show_tools:
+                yield f"\n\n> 🔧 Führe Tool aus: **{tool_name}**({_fmt_args(arguments)})…\n"
+            tool_result = await executor.execute(tool_name, arguments)
+            messages.append({"role": "tool", "content": tool_result})
+
+    messages.append({"role": "user", "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung."})
+    async for token in _stream_ollama_response(messages, stats):
+        yield token
+
+
+def _fmt_args(args: dict) -> str:
+    return ", ".join(f"{k}={v!r}" for k, v in args.items())
+
+
+def _extract_text_tool_calls(content: str) -> list[dict]:
+    """Recover tool calls a model emitted as plain-text JSON (one {"name":…, "arguments":…} per line)
+    instead of in the structured tool_calls field. Returns them in the structured shape."""
+    if not content or '"name"' not in content or '"arguments"' not in content:
+        return []
+    calls = []
+    for line in content.splitlines():
+        line = line.strip().strip(",").strip("`").strip()
+        if not (line.startswith("{") and '"name"' in line and '"arguments"' in line):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "name" in obj and "arguments" in obj:
+            calls.append({"function": {"name": obj["name"], "arguments": obj["arguments"]}})
+    return calls
 
 
 async def _record_metric(
@@ -175,6 +275,68 @@ async def analyze_portfolio_stream(
         {"role": "user", "content": user_prompt},
     ]
     # Portfolio summary is narrative — stream directly without the per-ticker tool loop.
+    async for chunk in _stream_ollama_response(messages):
+        yield chunk
+
+
+# ── GenAI features ────────────────────────────────────────────────────────────
+
+async def chat_stream(
+    question: str, db: AsyncSession, current_prices: dict[str, float]
+) -> AsyncGenerator[str, None]:
+    """Answer a free-text question about the portfolio, grounded in a live snapshot.
+
+    The chat is agentic: the LLM may call tools (get_fundamentals, run_statistical_model, …) to
+    pull LIVE data for ANY ticker — also stocks NOT in the portfolio — and base its answer on that.
+    """
+    snapshot = await build_portfolio_snapshot(db, current_prices)
+    held = [p["ticker"] for p in snapshot["positions"]]
+    messages = [
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        {"role": "user", "content": CHAT_USER_PROMPT.format(
+            held=", ".join(held) or "(leer)",
+            snapshot=json.dumps(snapshot, ensure_ascii=False, default=str),
+            question=question,
+        )},
+    ]
+    executor = ToolExecutor(db=db, current_prices=current_prices)
+    async for chunk in _run_agent_loop(messages, executor, show_tools=False):
+        yield chunk
+
+
+async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[str, None]:
+    """Summarize the latest cached news for a ticker into themes + risks."""
+    ticker = ticker.upper()
+    news = await fetch_and_store_news(ticker, db, days=14)
+    if not news:
+        yield f"Keine aktuellen Nachrichten für {ticker} verfügbar."
+        return
+
+    pos = (await db.execute(select(Position).where(Position.ticker == ticker))).scalar_one_or_none()
+    name = pos.name if pos else ticker
+    headlines = "\n".join(f"- {n.headline}" for n in news[:15])
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": NEWS_SUMMARY_PROMPT.format(ticker=ticker, name=name, headlines=headlines)},
+    ]
+    async for chunk in _stream_ollama_response(messages):
+        yield chunk
+
+
+async def rebalance_stream(
+    db: AsyncSession, current_prices: dict[str, float]
+) -> AsyncGenerator[str, None]:
+    """Generate diversification analysis + rebalancing suggestions from a portfolio snapshot."""
+    snapshot = await build_portfolio_snapshot(db, current_prices)
+    if not snapshot["positions"]:
+        yield "Keine Positionen im Portfolio."
+        return
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": REBALANCE_PROMPT.format(
+            snapshot=json.dumps(snapshot, ensure_ascii=False, default=str),
+        )},
+    ]
     async for chunk in _stream_ollama_response(messages):
         yield chunk
 
