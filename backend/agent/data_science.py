@@ -40,6 +40,19 @@ class ModelForecast:
     details: str
 
 
+@dataclass
+class EnsembleDecision:
+    """Deterministic, reproducible buy/hold/sell decision aggregated from all sub-models.
+
+    This — not the LLM — is the authoritative recommendation. The LLM only explains it.
+    """
+    signal: str          # BUY / HOLD / SELL
+    score: float         # weighted score in [-1, 1]
+    confidence: float    # [0, 1]
+    components: dict      # name -> {value, weight, contribution}
+    rationale: list[str]  # human-readable German bullet points
+
+
 def calculate_technical_indicators(prices: list[dict]) -> TechnicalIndicators:
     """Calculate technical indicators from a list of OHLCV dicts."""
     if len(prices) < 30:
@@ -290,3 +303,137 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     loss = (-delta.clip(upper=0)).rolling(period).mean()
     rs = gain / loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
+
+
+# ── Deterministic ensemble decision ─────────────────────────────────────────────
+
+# Weights for the weighted ensemble (sum = 1.0). Tunable, kept transparent on purpose.
+ENSEMBLE_WEIGHTS = {
+    "technical": 0.30,
+    "arima": 0.20,
+    "random_forest": 0.25,
+    "fundamentals": 0.10,
+    "news": 0.15,
+}
+BUY_THRESHOLD = 0.25
+SELL_THRESHOLD = -0.25
+
+
+def _signal_to_score(signal: str) -> float:
+    return {"BUY": 1.0, "BULLISH": 1.0, "SELL": -1.0, "BEARISH": -1.0}.get(signal, 0.0)
+
+
+def _fundamental_tilt(fundamentals: dict | None) -> tuple[float, list[str]]:
+    """Map fundamentals to a tilt in [-1, 1] plus rationale bullets."""
+    if not fundamentals:
+        return 0.0, []
+    tilt = 0.0
+    notes: list[str] = []
+
+    growth = fundamentals.get("revenue_growth")
+    if growth is not None:
+        if growth > 0.10:
+            tilt += 0.5
+            notes.append(f"Umsatzwachstum stark ({growth * 100:.0f}%)")
+        elif growth < 0:
+            tilt -= 0.5
+            notes.append(f"Umsatz rückläufig ({growth * 100:.0f}%)")
+
+    pe = fundamentals.get("pe_ratio")
+    if pe is not None and pe > 0:
+        if pe > 40:
+            tilt -= 0.3
+            notes.append(f"Hohe Bewertung (KGV {pe:.0f})")
+        elif pe < 20:
+            tilt += 0.2
+            notes.append(f"Moderate Bewertung (KGV {pe:.0f})")
+
+    return max(-1.0, min(1.0, tilt)), notes
+
+
+def compute_ensemble(
+    prices: list[dict],
+    fundamentals: dict | None = None,
+    news_sentiment: float | None = None,
+    portfolio_ctx: dict | None = None,
+) -> EnsembleDecision:
+    """Aggregate all sub-models into one reproducible BUY/HOLD/SELL decision.
+
+    Pure function of its inputs → identical inputs always yield the identical decision.
+    """
+    indicators = calculate_technical_indicators(prices)
+    arima = run_arima_forecast(prices)
+    ml = run_ml_signal(prices)
+
+    components: dict = {}
+    rationale: list[str] = []
+
+    # Sub-scores in [-1, 1]; ARIMA/RF additionally scaled by their own confidence.
+    tech_sub = _signal_to_score(indicators.trend_signal)
+    arima_sub = _signal_to_score(arima.signal) * (arima.confidence if arima.confidence else 0.5)
+    ml_sub = _signal_to_score(ml.signal) * (ml.confidence if ml.confidence else 0.5)
+    fund_sub, fund_notes = _fundamental_tilt(fundamentals)
+    news_sub = max(-1.0, min(1.0, news_sentiment)) if news_sentiment is not None else 0.0
+
+    subscores = {
+        "technical": tech_sub,
+        "arima": arima_sub,
+        "random_forest": ml_sub,
+        "fundamentals": fund_sub,
+        "news": news_sub,
+    }
+
+    score = 0.0
+    for name, sub in subscores.items():
+        weight = ENSEMBLE_WEIGHTS[name]
+        contribution = weight * sub
+        score += contribution
+        components[name] = {"value": round(sub, 3), "weight": weight, "contribution": round(contribution, 3)}
+
+    rationale.append(f"Technischer Trend: {indicators.trend_signal} (RSI {indicators.rsi_14:.0f})"
+                     if indicators.rsi_14 is not None else f"Technischer Trend: {indicators.trend_signal}")
+    rationale.append(f"ARIMA 30-Tage-Signal: {arima.signal}"
+                     + (f" (Konfidenz {arima.confidence:.0%})" if arima.confidence else ""))
+    rationale.append(f"RandomForest-Signal: {ml.signal}"
+                     + (f" (Konfidenz {ml.confidence:.0%})" if ml.confidence else ""))
+    rationale.extend(fund_notes)
+    if news_sentiment is not None:
+        label = "positiv" if news_sub > 0.1 else ("negativ" if news_sub < -0.1 else "neutral")
+        rationale.append(f"News-Sentiment: {label} ({news_sub:+.2f})")
+
+    # Portfolio rules as an additive tilt on top (mirrors useSignal.ts thresholds).
+    if portfolio_ctx:
+        ret = portfolio_ctx.get("unrealized_pnl_pct")
+        if ret is not None:
+            if ret > 20:
+                score -= 0.15
+                components["portfolio_rule"] = {"value": "Gewinnmitnahme", "weight": None, "contribution": -0.15}
+                rationale.append(f"Portfolio-Regel: +{ret:.0f}% Gewinn → Teilverkauf erwägen")
+            elif ret < -12:
+                score += 0.15
+                components["portfolio_rule"] = {"value": "Nachkauf", "weight": None, "contribution": 0.15}
+                rationale.append(f"Portfolio-Regel: {ret:.0f}% Verlust → Nachkauf-Chance prüfen")
+
+    score = max(-1.0, min(1.0, score))
+
+    if score > BUY_THRESHOLD:
+        signal = "BUY"
+    elif score < SELL_THRESHOLD:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    # Confidence: magnitude of the score + agreement among the three model signals.
+    direction = 1 if score > 0 else (-1 if score < 0 else 0)
+    model_dirs = [int(np.sign(tech_sub)), int(np.sign(arima_sub)), int(np.sign(ml_sub))]
+    nonzero = [d for d in model_dirs if d != 0]
+    agreement = (sum(1 for d in nonzero if d == direction) / len(nonzero)) if nonzero else 0.0
+    confidence = max(0.05, min(0.95, 0.5 * min(1.0, abs(score) / 0.5) + 0.5 * agreement))
+
+    return EnsembleDecision(
+        signal=signal,
+        score=round(score, 3),
+        confidence=round(confidence, 2),
+        components=components,
+        rationale=rationale,
+    )

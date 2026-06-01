@@ -22,9 +22,11 @@ docker-compose up -d
 
 ### 2. Pull the AI model (first time only)
 ```bash
-docker exec portfaio-ollama ollama pull qwen2.5:7b
+docker exec portfaio-ollama ollama pull qwen2.5:14b
 # or via the UI: KI-Analyse → "Modell laden"
 ```
+Default model is `qwen2.5:14b` (needs ~9 GB, comfortable on 16 GB Apple Silicon).
+Fallback for low-RAM machines: set `OLLAMA_MODEL=qwen2.5:7b` in `backend/.env`.
 
 ### 3. Start FastAPI backend
 ```bash
@@ -103,7 +105,7 @@ The Ollama agent uses **Qwen 2.5 tool-calling**:
 ```
 DATABASE_URL=postgresql+asyncpg://portfaio:portfaio@localhost:5432/portfaio
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_MODEL=qwen2.5:14b
 FINNHUB_API_KEY=<your key from finnhub.io>
 NEWS_API_KEY=<optional, newsapi.org>
 ```

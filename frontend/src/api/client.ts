@@ -66,6 +66,10 @@ export const api = {
       request<Fundamentals>(`/market-data/fundamentals/${ticker}`),
     news: (ticker: string, days = 7) =>
       request<NewsItem[]>(`/market-data/news/${ticker}?days=${days}`),
+    warmup: () =>
+      request<{ warmed_up: number; details: Record<string, unknown> }>(
+        '/market-data/warmup', { method: 'POST' },
+      ),
   },
 
   // ── Agent ────────────────────────────────────────────────────────────────────

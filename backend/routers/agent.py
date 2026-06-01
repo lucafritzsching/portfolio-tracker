@@ -1,77 +1,69 @@
 """Agent SSE streaming endpoint."""
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db
+from database import AsyncSessionLocal
 from agent.orchestrator import analyze_stock_stream, analyze_portfolio_stream
-from schemas import AnalyzeRequest
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
-@router.post("/analyze/{ticker}")
+
+def _parse_prices(current_prices: str) -> dict:
+    try:
+        return json.loads(current_prices) if current_prices else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+# NOTE: these are GET endpoints because the browser's EventSource API can only
+# issue GET requests. The DB session is opened *inside* the generator (not via
+# Depends) so it stays alive for the whole stream — a Depends(get_db) session is
+# torn down when the handler returns, before StreamingResponse drains the body.
+
+@router.get("/analyze/{ticker}")
 async def analyze_stock(
     ticker: str,
     current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
-    db: AsyncSession = Depends(get_db),
 ):
     """Stream Ollama agent analysis for a single stock via SSE."""
-    try:
-        prices = json.loads(current_prices) if current_prices else {}
-    except json.JSONDecodeError:
-        prices = {}
+    prices = _parse_prices(current_prices)
 
     async def event_stream():
-        try:
-            async for chunk in analyze_stock_stream(ticker.upper(), db, prices):
-                # SSE format: "data: ...\n\n"
-                escaped = chunk.replace("\n", "\\n")
-                yield f"data: {escaped}\n\n"
-        except Exception as e:
-            yield f"data: [FEHLER: {e}]\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
+        async with AsyncSessionLocal() as db:
+            try:
+                async for chunk in analyze_stock_stream(ticker.upper(), db, prices):
+                    # SSE data lines can't contain raw newlines; escape them.
+                    escaped = chunk.replace("\n", "\\n")
+                    yield f"data: {escaped}\n\n"
+            except Exception as e:
+                yield f"data: [FEHLER: {e}]\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
-@router.post("/analyze-portfolio")
+@router.get("/analyze-portfolio")
 async def analyze_portfolio(
     current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
-    db: AsyncSession = Depends(get_db),
 ):
     """Stream Ollama agent portfolio-wide analysis via SSE."""
-    try:
-        prices = json.loads(current_prices) if current_prices else {}
-    except json.JSONDecodeError:
-        prices = {}
+    prices = _parse_prices(current_prices)
 
     async def event_stream():
-        try:
-            async for chunk in analyze_portfolio_stream(db, prices):
-                escaped = chunk.replace("\n", "\\n")
-                yield f"data: {escaped}\n\n"
-        except Exception as e:
-            yield f"data: [FEHLER: {e}]\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
+        async with AsyncSessionLocal() as db:
+            try:
+                async for chunk in analyze_portfolio_stream(db, prices):
+                    escaped = chunk.replace("\n", "\\n")
+                    yield f"data: {escaped}\n\n"
+            except Exception as e:
+                yield f"data: [FEHLER: {e}]\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.get("/status")

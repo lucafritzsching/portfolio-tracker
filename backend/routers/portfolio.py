@@ -28,7 +28,9 @@ async def create_position(body: PositionCreate, db: AsyncSession = Depends(get_d
     existing = await db.execute(select(Position).where(Position.ticker == body.ticker.upper()))
     if existing.scalar_one_or_none():
         raise HTTPException(400, f"Position {body.ticker.upper()} existiert bereits")
-    pos = Position(**body.model_dump(), ticker=body.ticker.upper())
+    data = body.model_dump()
+    data["ticker"] = data["ticker"].upper()
+    pos = Position(**data)
     db.add(pos)
     await db.commit()
     await db.refresh(pos)
@@ -84,10 +86,11 @@ async def add_transaction(ticker: str, body: TransactionCreate, db: AsyncSession
         pos.shares = pos.shares + body.shares
     else:
         pos.shares = pos.shares - body.shares
-        if pos.shares <= Decimal("0.000001"):
-            await db.delete(pos)
-            await db.commit()
-            return TransactionOut.model_validate({**body.model_dump(), "id": 0, "ticker": ticker})
+        # Keep the position (and its transaction history) even when fully sold.
+        # Deleting it here would cascade-delete every transaction — including this
+        # closing sell and its realized P&L — destroying the long-term track record.
+        if pos.shares < Decimal("0.000001"):
+            pos.shares = Decimal("0")
 
     await db.commit()
     await db.refresh(tx)
@@ -112,7 +115,9 @@ async def list_savings_plans(db: AsyncSession = Depends(get_db)):
 
 @router.post("/savings-plans", response_model=SavingsPlanOut, status_code=201)
 async def create_savings_plan(body: SavingsPlanCreate, db: AsyncSession = Depends(get_db)):
-    plan = SavingsPlan(**body.model_dump(), ticker=body.ticker.upper())
+    data = body.model_dump()
+    data["ticker"] = data["ticker"].upper()
+    plan = SavingsPlan(**data)
     db.add(plan)
     await db.commit()
     await db.refresh(plan)
@@ -137,6 +142,8 @@ async def execute_savings_plan(plan_id: int, current_price: float, db: AsyncSess
         raise HTTPException(404, "Sparplan nicht gefunden")
 
     price = Decimal(str(current_price))
+    if price <= 0:
+        raise HTTPException(400, "current_price muss größer als 0 sein")
     shares_bought = plan.monthly_amount / price
 
     execution = SavingsPlanExecution(
@@ -152,6 +159,11 @@ async def execute_savings_plan(plan_id: int, current_price: float, db: AsyncSess
     pos = pos_result.scalar_one_or_none()
     if pos:
         pos.shares = pos.shares + shares_bought
+    else:
+        # No position yet for this ticker — create one so the buy transaction's
+        # foreign key resolves (otherwise the commit fails with IntegrityError).
+        pos = Position(ticker=plan.ticker, name=plan.ticker, shares=shares_bought)
+        db.add(pos)
 
     tx = Transaction(
         ticker=plan.ticker,

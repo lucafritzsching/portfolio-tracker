@@ -94,6 +94,34 @@ function analyzePortfolio() {
     if (!portfolioAnalysis.value) portfolioAnalysis.value = '[Verbindungsfehler zum Agenten]'
   }
 }
+
+const warmingUp = ref(false)
+const warmupMsg = ref('')
+
+async function warmup() {
+  warmingUp.value = true
+  warmupMsg.value = ''
+  try {
+    const res = await api.marketData.warmup()
+    warmupMsg.value = `✓ Daten für ${res.warmed_up} Ticker vorbereitet.`
+  } catch (e: any) {
+    warmupMsg.value = 'Fehler: ' + e.message
+  } finally {
+    warmingUp.value = false
+  }
+}
+
+// The stream sends the deterministic decision first, then "## Begründung des Agenten".
+// Split so we can show them as two distinct cards.
+const AGENT_MARKER = '## Begründung des Agenten'
+function splitAnalysis(text: string): { decision: string; agent: string } {
+  const idx = text.indexOf(AGENT_MARKER)
+  if (idx === -1) return { decision: text, agent: '' }
+  return {
+    decision: text.slice(0, idx).replace(/\n*---\n*$/, '').trim(),
+    agent: text.slice(idx).trim(),
+  }
+}
 </script>
 
 <template>
@@ -118,6 +146,9 @@ function analyzePortfolio() {
           <button class="btn btn-sm" @click="checkAgentStatus" :disabled="statusLoading">
             <span v-if="statusLoading" class="spinner" /> <span v-else>↻ Status prüfen</span>
           </button>
+          <button class="btn btn-sm" @click="warmup" :disabled="warmingUp || portfolio.positions.length === 0" title="Kurse, Fundamentaldaten und News für alle Positionen vorab cachen">
+            <span v-if="warmingUp" class="spinner" /> <span v-else>⬇ Daten vorbereiten</span>
+          </button>
           <button
             v-if="agentStatus.ollama_reachable && !agentStatus.model_available"
             class="btn btn-primary btn-sm"
@@ -128,6 +159,7 @@ function analyzePortfolio() {
           </button>
         </div>
       </div>
+      <div v-if="warmupMsg" style="margin-top: 8px; font-size: 12px; color: var(--text-secondary)">{{ warmupMsg }}</div>
       <pre v-if="pullLog" style="margin-top: 12px; font-size: 11px; background: var(--bg-secondary); padding: 10px; border-radius: 6px; max-height: 120px; overflow-y: auto">{{ pullLog }}</pre>
     </div>
 
@@ -188,10 +220,19 @@ function analyzePortfolio() {
         </div>
       </div>
 
-      <div v-if="analysisText[pos.ticker]" class="ai-box">{{ analysisText[pos.ticker] }}</div>
+      <template v-if="analysisText[pos.ticker]">
+        <div class="ai-box decision-box">{{ splitAnalysis(analysisText[pos.ticker]).decision }}</div>
+        <div v-if="splitAnalysis(analysisText[pos.ticker]).agent" class="ai-box" style="margin-top: 10px">{{ splitAnalysis(analysisText[pos.ticker]).agent }}</div>
+      </template>
       <div v-else-if="analysisRunning[pos.ticker]" class="ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
-        <span class="spinner" /> Agent läuft: ruft Marktdaten ab, berechnet Indikatoren, trainiert Modelle...
+        <span class="spinner" /> Agent läuft: sammelt Daten, berechnet das Ensemble, begründet die Entscheidung...
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.decision-box {
+  border-left: 3px solid var(--blue);
+}
+</style>

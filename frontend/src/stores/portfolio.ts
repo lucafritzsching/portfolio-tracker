@@ -22,7 +22,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       total_value += value
 
       const prev_close = pos.previous_close ?? pos.current_price ?? 0
-      day_pnl += (pos.current_price ?? 0 - prev_close) * pos.shares
+      day_pnl += ((pos.current_price ?? 0) - prev_close) * pos.shares
 
       const avg = pos.avg_buy_price ?? pos.manual_buy_price
       if (avg != null) {

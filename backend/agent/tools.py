@@ -1,6 +1,7 @@
 """Tool definitions for the Ollama Qwen agent (function calling / tool use)."""
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -15,7 +16,8 @@ from agent.data_science import (
     run_arima_forecast,
     run_ml_signal,
 )
-from models import Position, Transaction, PriceHistory, FundamentalsCache, NewsCache
+from models import Position, Transaction, NewsCache
+from services.market_data import fetch_and_store_prices, prices_to_dicts
 
 # ── Tool schemas for Ollama (OpenAI-compatible format) ───────────────────────
 
@@ -137,11 +139,7 @@ class ToolExecutor:
 
     async def _get_historical_prices(self, ticker: str, period: str = "1y") -> str:
         ticker = ticker.upper()
-        if ticker in self._price_cache:
-            prices = self._price_cache[ticker]
-        else:
-            prices = await self._fetch_prices(ticker, period)
-            self._price_cache[ticker] = prices
+        prices = await self._fetch_prices(ticker, period)
 
         if not prices:
             return json.dumps({"error": f"Keine Kursdaten für {ticker}"})
@@ -174,7 +172,7 @@ class ToolExecutor:
     async def _get_fundamentals(self, ticker: str) -> str:
         ticker = ticker.upper()
         try:
-            info = yf.Ticker(ticker).info
+            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
             if not info:
                 return json.dumps({"error": "Keine Daten"})
             return json.dumps({
@@ -289,10 +287,11 @@ class ToolExecutor:
             unrealized_pnl = (current_price - avg_buy) * float(pos.shares)
             unrealized_pnl_pct = (current_price - avg_buy) / avg_buy * 100
 
-        # Portfolio weight
+        # Portfolio weight — must be relative to ALL positions, not just this one.
+        all_positions = (await self.db.execute(select(Position))).scalars().all()
         total_value = sum(
-            self.current_prices.get(t, 0) * float(p.shares)
-            for t, p in [(ticker, pos)]
+            self.current_prices.get(p.ticker, 0) * float(p.shares)
+            for p in all_positions
         )
         position_value = (current_price or 0) * float(pos.shares)
         portfolio_weight = (position_value / total_value * 100) if total_value > 0 else None
@@ -311,36 +310,14 @@ class ToolExecutor:
         })
 
     async def _fetch_prices(self, ticker: str, period: str) -> list[dict]:
-        """Fetch from DB cache or yfinance."""
-        result = await self.db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.ticker == ticker)
-            .order_by(PriceHistory.date)
-        )
-        rows = result.scalars().all()
-        if rows:
-            return [{"date": str(r.date), "open": float(r.open), "high": float(r.high),
-                     "low": float(r.low), "close": float(r.close), "volume": r.volume}
-                    for r in rows]
-
-        # Fallback: fetch directly via yfinance
-        try:
-            df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
-            if df.empty:
-                return []
-            prices = []
-            for idx, row in df.iterrows():
-                prices.append({
-                    "date": str(idx.date()),
-                    "open": float(row["Open"].iloc[0] if hasattr(row["Open"], "iloc") else row["Open"]),
-                    "high": float(row["High"].iloc[0] if hasattr(row["High"], "iloc") else row["High"]),
-                    "low": float(row["Low"].iloc[0] if hasattr(row["Low"], "iloc") else row["Low"]),
-                    "close": float(row["Close"].iloc[0] if hasattr(row["Close"], "iloc") else row["Close"]),
-                    "volume": int(row["Volume"].iloc[0] if hasattr(row["Volume"], "iloc") else row["Volume"]),
-                })
-            return prices
-        except Exception:
-            return []
+        """Fetch prices via the shared service, cached per analysis to avoid repeat work."""
+        ticker = ticker.upper()
+        if ticker in self._price_cache:
+            return self._price_cache[ticker]
+        rows = await fetch_and_store_prices(ticker, self.db, period=period)
+        prices = prices_to_dicts(rows)
+        self._price_cache[ticker] = prices
+        return prices
 
 
 def _interpret_indicators(ind) -> str:
