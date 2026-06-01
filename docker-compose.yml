@@ -16,21 +16,11 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: portfaio-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    # GPU support (optional, remove if no NVIDIA GPU)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+  # NOTE: Ollama runs NATIVELY on the host (not in Docker) so it can use the
+  # Mac's Metal GPU (or an NVIDIA GPU on Linux/Windows). A container on macOS
+  # would be CPU-only and far too slow for a 14B model. The backend reaches the
+  # host's Ollama via host.docker.internal. Install Ollama locally and run:
+  #   ollama pull qwen3:14b
 
   backend:
     build:
@@ -42,19 +32,19 @@ services:
     # Secrets (FINNHUB_API_KEY, NEWS_API_KEY) come from backend/.env — single source of truth.
     env_file:
       - ./backend/.env
-    # These override the localhost values in backend/.env with the in-network service names.
+    # Override localhost values from backend/.env with container-reachable hosts:
+    # postgres via the compose network, Ollama via the host (native, GPU-accelerated).
     environment:
       DATABASE_URL: postgresql+asyncpg://portfaio:portfaio@postgres:5432/portfaio
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # makes the host reachable on Linux too
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
     volumes:
       - ./backend:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:
-  ollama_data:

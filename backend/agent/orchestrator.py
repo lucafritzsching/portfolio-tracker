@@ -17,11 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent.data_science import EnsembleDecision
 from agent.pipeline import build_ensemble_decision
 from agent.prompts import SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT
-from agent.tools import TOOL_DEFINITIONS, ToolExecutor
 from config import settings
 from models import Position, AnalysisResult
-
-MAX_TOOL_ITERATIONS = 8
 
 _COMPONENT_LABELS = {
     "technical": "Technischer Trend",
@@ -77,7 +74,10 @@ async def analyze_stock_stream(
     yield block
     full_response = block
 
-    # Phase 3 + 4: LLM investigates via tools, then explains the decision.
+    # Phase 3: the deterministic pipeline already gathered prices, indicators,
+    # fundamentals and news (all in `context`), so we hand that to the LLM and
+    # stream its German explanation directly — no redundant tool round-trips,
+    # which keeps the local 14B model responsive enough for live use.
     user_prompt = EXPLAIN_STOCK_PROMPT.format(
         ticker=ticker,
         signal=decision.signal,
@@ -91,9 +91,8 @@ async def analyze_stock_stream(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
-    executor = ToolExecutor(db=db, current_prices=current_prices)
 
-    async for chunk in _run_agent_loop(messages, executor):
+    async for chunk in _stream_ollama_response(messages):
         full_response += chunk
         yield chunk
 
@@ -137,71 +136,13 @@ async def analyze_portfolio_stream(
         yield chunk
 
 
-async def _run_agent_loop(
-    messages: list[dict],
-    executor: ToolExecutor,
-) -> AsyncGenerator[str, None]:
-    """Tool-use loop: non-streaming calls detect tool calls; the final answer is real-streamed."""
-    iteration = 0
-    while iteration < MAX_TOOL_ITERATIONS:
-        iteration += 1
-        is_last = iteration >= MAX_TOOL_ITERATIONS
-
-        payload = {
-            "model": settings.ollama_model,
-            "messages": messages,
-            "stream": False,
-            "tools": TOOL_DEFINITIONS if not is_last else [],
-            "options": {"temperature": 0.3},
-        }
-        async with httpx.AsyncClient(timeout=180) as client:
-            try:
-                resp = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                yield f"\n\n[Fehler bei Ollama-Anfrage: {e}]"
-                return
-
-        message = data.get("message", {})
-        tool_calls = message.get("tool_calls", [])
-
-        if not tool_calls:
-            # Final answer: re-issue the same context with streaming + no tools for real token-by-token output.
-            async for token in _stream_ollama_response(messages):
-                yield token
-            return
-
-        messages.append({"role": "assistant", "content": message.get("content", ""), "tool_calls": tool_calls})
-        for tc in tool_calls:
-            fn = tc.get("function", {})
-            tool_name = fn.get("name", "")
-            arguments = fn.get("arguments", {})
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except json.JSONDecodeError:
-                    arguments = {}
-
-            yield f"\n\n> Führe Tool aus: **{tool_name}**({_fmt_args(arguments)})...\n"
-            tool_result = await executor.execute(tool_name, arguments)
-            messages.append({"role": "tool", "content": tool_result})
-
-    # Reached the iteration cap: ask for a final summary, streamed.
-    messages.append({
-        "role": "user",
-        "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung.",
-    })
-    async for token in _stream_ollama_response(messages):
-        yield token
-
-
 async def _stream_ollama_response(messages: list[dict]) -> AsyncGenerator[str, None]:
     """Real token streaming from Ollama /api/chat (no tools, so the output is pure text)."""
     payload = {
         "model": settings.ollama_model,
         "messages": messages,
         "stream": True,
+        "think": False,  # qwen3 is a thinking model; disable to avoid slow <think> output
         "options": {"temperature": 0.3},
     }
     async with httpx.AsyncClient(timeout=180) as client:
@@ -223,7 +164,3 @@ async def _stream_ollama_response(messages: list[dict]) -> AsyncGenerator[str, N
                         break
         except Exception as e:
             yield f"\n\n[Fehler beim Streaming: {e}]"
-
-
-def _fmt_args(args: dict) -> str:
-    return ", ".join(f"{k}={repr(v)}" for k, v in args.items())

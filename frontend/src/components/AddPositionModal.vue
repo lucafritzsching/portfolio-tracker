@@ -27,8 +27,10 @@ async function lookupTicker() {
   quoteError.value = ''
   try {
     const q = await api.quotes.get(form.ticker.trim().toUpperCase())
-    if (!form.name) form.name = q.ticker
     form.ticker = q.ticker
+    if (!form.name) form.name = q.name || q.ticker
+    if (!form.buyPrice) form.buyPrice = q.current_price.toFixed(2)
+    if (q.sector) form.sector = q.sector
   } catch {
     quoteError.value = 'Symbol nicht gefunden'
   } finally {

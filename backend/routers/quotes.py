@@ -4,6 +4,35 @@ from fastapi import APIRouter, HTTPException, Query
 from config import settings
 from schemas import QuoteOut
 
+INDUSTRY_MAP = {
+    "Technology": "Technologie",
+    "Software": "Technologie",
+    "Semiconductors": "Technologie",
+    "Hardware": "Technologie",
+    "Internet Content & Information": "Technologie",
+    "Communication Services": "Technologie",
+    "Banks": "Finanzen",
+    "Insurance": "Finanzen",
+    "Financial Services": "Finanzen",
+    "Asset Management": "Finanzen",
+    "Biotechnology": "Gesundheit",
+    "Pharmaceuticals": "Gesundheit",
+    "Medical Devices": "Gesundheit",
+    "Healthcare": "Gesundheit",
+    "Oil & Gas": "Energie",
+    "Energy": "Energie",
+    "Beverages": "Konsumgüter",
+    "Food": "Konsumgüter",
+    "Retail": "Konsumgüter",
+    "Automobiles": "Konsumgüter",
+    "Consumer Electronics": "Konsumgüter",
+    "Industrials": "Industrie",
+    "Aerospace & Defense": "Industrie",
+    "Machinery": "Industrie",
+    "ETF": "ETF / Fonds",
+    "Exchange Traded Fund": "ETF / Fonds",
+}
+
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\^=\-]{1,20}$", re.IGNORECASE)
@@ -28,11 +57,26 @@ async def get_quote(ticker: str):
     if not resp.is_success or data.get("c") == 0:
         raise HTTPException(404, f"Symbol {ticker} nicht gefunden")
 
+    company_name = None
+    sector = None
+    try:
+        profile_url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={settings.finnhub_api_key}"
+        async with httpx.AsyncClient(timeout=10) as profile_client:
+            profile_resp = await profile_client.get(profile_url)
+            profile = profile_resp.json()
+            company_name = profile.get("name")
+            industry = profile.get("finnhubIndustry", "")
+            sector = next((v for k, v in INDUSTRY_MAP.items() if k.lower() in industry.lower()), "Sonstiges")
+    except Exception:
+        pass
+
     return QuoteOut(
         ticker=ticker,
         current_price=data["c"],
         day_change=data["dp"],
         previous_close=data["pc"],
+        name=company_name,
+        sector=sector,
     )
 
 

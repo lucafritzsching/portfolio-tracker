@@ -88,6 +88,8 @@ class QuoteOut(BaseModel):
     current_price: float
     day_change: float
     previous_close: float
+    name: str | None = None
+    sector: str | None = None
 
 
 class PriceHistoryOut(BaseModel):

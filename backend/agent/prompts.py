@@ -21,10 +21,11 @@ Komponenten-Breakdown:
 Stichpunkte der Pipeline:
 {rationale}
 
-Zusätzlicher Kontext: {context}
+Zusätzlicher Kontext (bereits erhobene Daten – Fundamentaldaten, News-Sentiment, Portfolio-Bezug,
+Anzahl Kursdatenpunkte): {context}
 
-Untersuche die Lage mit den Tools (historische Kurse, technische Indikatoren, Fundamentaldaten, News,
-statistische Modelle) und erkläre dann strukturiert auf Deutsch:
+Stütze dich ausschließlich auf die oben angegebenen Werte (keine erfundenen Zahlen) und erkläre
+strukturiert auf Deutsch:
 
 ## Begründung der Empfehlung
 [Warum führt die Datenlage zu **{signal}**? Beziehe dich auf konkrete Werte.]
