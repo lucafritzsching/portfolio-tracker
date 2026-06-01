@@ -1,39 +1,122 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
-## Running the App
+## Architecture (Production)
 
-No build step or package manager. Open `index.html` directly in a browser:
+Full-stack local webapp. The old `index.html` prototype is kept as reference only.
 
 ```
-# On Windows
-start index.html
-
-# Or just double-click index.html in Explorer
+frontend/    Vue 3 + TypeScript + Vite   → localhost:5173
+backend/     Python FastAPI              → localhost:8000
+             PostgreSQL (Docker)         → localhost:5432
+             Ollama (Docker)             → localhost:11434
 ```
 
-Chart.js is loaded from CDN (`cdnjs.cloudflare.com`), so an internet connection is required for charts to render.
+## Starting the App
 
-## Architecture
-
-The entire application lives in a single file: `index.html`. It contains HTML, CSS (embedded `<style>`), and JavaScript (embedded `<script>`). There are no external files, no modules, and no build tooling.
-
-**State:** Portfolio positions are stored in `localStorage` under the key `portfaio-portfolio` as a JSON array. The `save()` function persists after every mutation.
-
-**Views:** Four views (`dashboard`, `stocks`, `news`, `analysis`) are toggled by showing/hiding `<div id="view-*">` elements. `showView(v)` handles the switching and triggers the appropriate render function.
-
-**Data model** (each position object):
-```js
-{ ticker, name, shares, buyPrice, currentPrice, dayChange, sector, alerts: { news: true } }
+### 1. Start backend services (PostgreSQL + Ollama)
+```bash
+docker-compose up -d
 ```
 
-**Signal logic** (`getSignal`): `>+20%` return → "Verkaufen", `<-12%` return → "Nachkaufen", `|dayChange| > 4%` → "Beobachten", else "Halten".
+### 2. Pull the AI model (first time only)
+```bash
+docker exec portfaio-ollama ollama pull qwen2.5:7b
+# or via the UI: KI-Analyse → "Modell laden"
+```
 
-**Charts:** Two Chart.js doughnut charts (allocation and sector breakdown) rendered on the dashboard. References are kept in module-level `allocChart` / `sectorChart` variables and destroyed before re-render to avoid memory leaks.
+### 3. Start FastAPI backend
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate  # once
+pip install -r requirements.txt                      # once
+cp .env.example .env                                 # add FINNHUB_API_KEY
+uvicorn main:app --reload
+```
 
-**AI Analysis:** `analyzeStock(i)` and `runAIAnalysis()` call the Anthropic Messages API directly from the browser (`https://api.anthropic.com/v1/messages`, model `claude-sonnet-4-20250514`). The current code is missing the required `x-api-key` header — AI features will return 401 errors until a key is injected. Prompts are written in German and request responses in German.
+### 4. Start Vue frontend
+```bash
+cd frontend
+npm install   # once
+npm run dev
+```
 
-**News:** The news feed in the News view is entirely mock/templated data generated from the portfolio array — there is no real news API integration.
+Open http://localhost:5173
 
-**i18n:** The UI language is German throughout (labels, prompts, error messages).
+## Backend Structure
+
+| File | Purpose |
+|------|---------|
+| `backend/main.py` | FastAPI app, CORS, router registration, DB init on startup |
+| `backend/config.py` | Settings via pydantic-settings + .env |
+| `backend/database.py` | SQLAlchemy async engine, `init_db()` |
+| `backend/models.py` | ORM models: Position, Transaction, SavingsPlan, PriceHistory, FundamentalsCache, NewsCache, AnalysisResult |
+| `backend/schemas.py` | Pydantic request/response schemas |
+| `backend/routers/portfolio.py` | CRUD for positions, transactions, savings plans; `/import` for localStorage migration |
+| `backend/routers/quotes.py` | Finnhub stock price proxy |
+| `backend/routers/market_data.py` | Historical prices, fundamentals, news (yfinance + Finnhub) |
+| `backend/routers/agent.py` | **SSE streaming agent endpoint** `/api/agent/analyze/{ticker}` |
+| `backend/agent/orchestrator.py` | **Agent loop**: tool-calling → Ollama → tool-calling → final SSE stream |
+| `backend/agent/tools.py` | Tool definitions (Qwen tool-calling format) + ToolExecutor |
+| `backend/agent/data_science.py` | Technical indicators, ARIMA forecast, Random Forest signal |
+| `backend/agent/prompts.py` | German prompt templates |
+
+## Frontend Structure
+
+| File | Purpose |
+|------|---------|
+| `frontend/src/types/index.ts` | TypeScript interfaces: Position, Transaction, SavingsPlan, etc. |
+| `frontend/src/api/client.ts` | Typed fetch wrappers for all backend endpoints + EventSource for SSE |
+| `frontend/src/stores/portfolio.ts` | Pinia store: positions, transactions, savings plans, stats |
+| `frontend/src/stores/ui.ts` | Pinia store: active view, modals |
+| `frontend/src/views/AnalysisView.vue` | **Main feature**: KI-Analyse with SSE EventSource streaming |
+| `frontend/src/views/DashboardView.vue` | Metrics, charts, positions table |
+| `frontend/src/views/PositionsView.vue` | Position cards, transaction history, transaction modal |
+| `frontend/src/views/SavingsView.vue` | Savings plans management |
+| `frontend/src/views/NewsView.vue` | News feed via Finnhub News API |
+| `frontend/src/composables/useFormatters.ts` | fmt(), fmtPct(), fmtCurrency(), fmtDate() |
+| `frontend/src/composables/useSignal.ts` | getSignal() → Verkaufen/Halten/Nachkaufen/Beobachten |
+
+## Data Model (PostgreSQL)
+
+**positions** — ticker (unique), name, shares, sector, note, manual_buy_price, alerts_news
+**transactions** — ticker (FK), type (buy/sell), shares, price, date, realized_pnl
+**savings_plans** — ticker, monthly_amount, execution_day
+**savings_plan_executions** — plan_id (FK), date, amount, shares, price
+**price_history** — ticker+date (unique index), OHLCV
+**fundamentals_cache** — P/E, market_cap, EPS, revenue_growth, 52w high/low, beta, dividend_yield
+**news_cache** — ticker, headline, summary, url, published_at, sentiment
+**analysis_results** — ticker, analysis_text, model, created_at
+
+## Agent Architecture
+
+The Ollama agent uses **Qwen 2.5 tool-calling**:
+1. Frontend sends POST to `/api/agent/analyze/{ticker}` → SSE stream
+2. FastAPI builds context from PostgreSQL, calls Ollama with tool definitions
+3. Agent calls tools: `get_historical_prices`, `calculate_technical_indicators`, `get_fundamentals`, `get_news`, `run_statistical_model`, `get_portfolio_context`
+4. DS pipeline: RSI, MACD, Bollinger, ARIMA forecast, Random Forest Buy/Hold/Sell
+5. Agent synthesizes → final recommendation streams token-by-token to frontend
+
+## Environment Variables (backend/.env)
+
+```
+DATABASE_URL=postgresql+asyncpg://portfaio:portfaio@localhost:5432/portfaio
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+FINNHUB_API_KEY=<your key from finnhub.io>
+NEWS_API_KEY=<optional, newsapi.org>
+```
+
+## Signal Logic (unchanged from prototype)
+
+`getSignal(pos)` in `frontend/src/composables/useSignal.ts`:
+- Return > +20% → "Verkaufen"
+- Return < -12% → "Nachkaufen"
+- |dayChange| > 4% → "Beobachten"
+- else → "Halten"
+
+## Legacy Prototype
+
+The original single-file prototype is at `index.html` (root). It still works standalone for reference.
+To migrate localStorage data to the new backend: POST to `/api/portfolio/import` with the JSON dump.

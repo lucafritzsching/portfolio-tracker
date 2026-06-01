@@ -1,0 +1,32 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# Data validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Finance data
+yfinance==0.2.51
+pandas==2.2.3
+pandas-ta==0.3.14b0
+
+# ML / Stats
+scikit-learn==1.5.2
+statsmodels==0.14.4
+numpy==1.26.4
+
+# HTTP client (for Finnhub, NewsAPI, Ollama)
+httpx==0.28.1
+
+# News sentiment
+textblob==0.18.0
+
+# Utilities
+python-dateutil==2.9.0
