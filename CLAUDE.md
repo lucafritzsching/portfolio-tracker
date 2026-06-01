@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
+## Full Documentation
+
+Human- and agent-facing docs live in [`docs/`](docs/README.md) (German). Start there for the *why*:
+vision ([01](docs/01-vision-und-ziele.md)), architecture + trade-offs ([02](docs/02-architektur.md)),
+**the hybrid agent** ([03](docs/03-agent-design.md)), backend ([04](docs/04-backend.md)),
+frontend ([05](docs/05-frontend.md)), setup ([06](docs/06-setup-und-betrieb.md)),
+decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/08-api-referenz.md)).
+
 ## Architecture (Production)
 
 Full-stack local webapp. The old `index.html` prototype is kept as reference only.

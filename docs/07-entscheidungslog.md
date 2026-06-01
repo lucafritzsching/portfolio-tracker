@@ -1,0 +1,106 @@
+# 7. Entscheidungslog (ADRs)
+
+Chronologische Architektur-Entscheidungen mit Begründung. Format je Eintrag:
+**Kontext → Entscheidung → Begründung → Konsequenz.**
+
+---
+
+## ADR-01 – Neubau als Full-Stack-App statt Prototyp-Erweiterung
+**Kontext:** Der Ausgangsstand war ein einzelnes `index.html` (HTML/CSS/JS, `localStorage`) – ein
+Prototyp. Ziel ist eine produktionsnahe App mit lokalem KI-Agenten.
+**Entscheidung:** Kompletter Neubau: Vue 3 + TypeScript (Frontend), FastAPI (Backend),
+PostgreSQL (DB), Ollama (LLM). Kein Migrationsaufwand außer optionalem Datenimport.
+**Begründung:** Data Science braucht Python; der Agent braucht serverseitige Orchestrierung +
+Streaming; `localStorage` ist für dauerhafte Historie ungeeignet.
+**Konsequenz:** Klare Schichtentrennung; der Prototyp bleibt nur als Referenz (`index.html`).
+
+## ADR-02 – PostgreSQL statt SQLite
+**Kontext:** Single-User-App auf einem Laptop; Datenmengen klein.
+**Entscheidung:** PostgreSQL (in Docker).
+**Begründung:** Persistenter Cache für Kurszeitreihen/News, „production"-Optik fürs Uni-Projekt,
+Docker läuft ohnehin für Ollama.
+**Konsequenz / Trade-off:** Bewusst überdimensioniert – SQLite hätte genügt. Akzeptiert wegen
+Optik und geringem Zusatzaufwand. (Dokumentiert als verteidigbarer Trade-off.)
+
+## ADR-03 – FastAPI als Backend
+**Kontext:** Brauchen DS-Bibliotheken (pandas/sklearn/statsmodels/yfinance) und SSE-Streaming.
+**Entscheidung:** Python + FastAPI.
+**Begründung:** Beste DS-Integration + erstklassiges async/`StreamingResponse`.
+**Konsequenz:** Agent-Streaming und ML laufen im selben Stack.
+
+## ADR-04 – Agent-Streaming via SSE/EventSource ⇒ GET-Endpunkte + eigene DB-Session
+**Kontext:** Die Analyse soll token-weise im Browser erscheinen.
+**Entscheidung:** Server-Sent Events; Browser nutzt `EventSource`. Die Agent-Endpunkte sind **GET**,
+und die DB-Session wird **innerhalb des Stream-Generators** geöffnet.
+**Begründung:** `EventSource` kann nur GET. Eine `Depends(get_db)`-Session würde beim Rückkehren des
+Handlers geschlossen – also bevor der Stream den Body sendet.
+**Konsequenz:** `routers/agent.py` nutzt `async with AsyncSessionLocal()`. (Frühere POST-Variante war
+inkompatibel mit EventSource → behoben.)
+
+## ADR-05 – Vollverkauf behält die Position (`shares = 0`) statt sie zu löschen
+**Kontext:** `Position`⇄`Transaction` hat eine Lösch-Kaskade.
+**Entscheidung:** Beim Verkauf der letzten Anteile wird die Position auf `shares = 0` gesetzt, nicht
+gelöscht.
+**Begründung:** Ein Löschen würde per Kaskade die gesamte Transaktionshistorie (inkl. realisiertem
+P&L) mitlöschen und die Langzeit-Nachvollziehbarkeit zerstören.
+**Konsequenz:** Historie bleibt erhalten; geschlossene Positionen haben `shares = 0`.
+
+## ADR-06 – Modell-Upgrade Qwen 2.5 7B → 14B
+**Kontext:** Demo-Laptop ist Apple Silicon mit ≥16 GB RAM.
+**Entscheidung:** Standardmodell `qwen2.5:14b`; `qwen2.5:7b` als Low-RAM-Fallback.
+**Begründung:** 14B (~9 GB q4) bietet deutlich bessere Reasoning-/Tool-Calling-/Deutsch-Qualität und
+läuft auf 16 GB flüssig.
+**Konsequenz:** Konfigurierbar über `OLLAMA_MODEL` in `backend/.env`.
+
+## ADR-07 – Hybrid-Agent: deterministische Entscheidung, LLM erklärt
+**Kontext:** Ein autonom entscheidendes 7B/14B-LLM ist unzuverlässig und **nicht reproduzierbar**.
+**Entscheidung:** Die Empfehlung kommt aus `compute_ensemble` (reine Funktion). Das LLM untersucht
+(Tool-Calling) und **begründet** die Entscheidung, überschreibt sie aber nie.
+**Begründung:** Reproduzierbarkeit + Nachvollziehbarkeit (akademisch verteidigbar) bei gleichzeitiger
+„Agenten"-Optik. Siehe [03-agent-design.md](03-agent-design.md).
+**Konsequenz:** 4-Phasen-Ablauf; klar getrennte Verantwortlichkeiten (Pipeline vs. LLM).
+
+## ADR-08 – Eine geteilte Datenquelle + nicht-blockierendes I/O
+**Kontext:** yfinance/Finnhub-Abrufe waren teils in Routern *und* im Agenten dupliziert und liefen
+blockierend im Event-Loop.
+**Entscheidung:** Aller Abruf+Cache in `services/market_data.py`; alle yfinance-Aufrufe via
+`asyncio.to_thread`. Pro-Analyse-Cache im `ToolExecutor`.
+**Begründung:** Eine Datenquelle/ein Cache; der Event-Loop blockiert nicht während mehrsekündiger
+Netzabrufe.
+**Konsequenz:** Router und Agent rufen dieselben Funktionen; Freshness-Regeln zentral.
+
+## ADR-09 – News-Sentiment per LLM-Aggregat statt Keyword-Zählung
+**Kontext:** Ursprüngliches Sentiment war reine Keyword-Zählung – schwach.
+**Entscheidung:** Ein LLM-Aggregataufruf (`agent/sentiment.py`, Temperatur 0) liefert einen
+Sentiment-Score; Keyword-Variante bleibt Offline-Fallback.
+**Begründung:** Bessere Qualität ohne schwere Abhängigkeit (kein FinBERT/torch).
+**Konsequenz:** Sentiment fließt als gewichtete Komponente (0.15) ins Ensemble.
+
+## ADR-10 – Dependency-Hygiene
+**Kontext:** `pandas-ta` war ungenutzt (Indikatoren sind handgerechnet) und inkompatibel mit numpy 2;
+`vue-router` war ungenutzt (Views laufen über den `ui`-Store).
+**Entscheidung:** Beide entfernt; toter Scaffold-Code gelöscht.
+**Begründung:** Weniger Angriffsfläche, schlankere Builds, klarere Codebasis.
+**Konsequenz:** Indikatoren bleiben in `data_science.py` selbst implementiert.
+
+---
+
+## Behobene Bugs aus dem Code-Review (Baseline)
+
+Vor dem Agenten-Umbau wurde die erste Implementierung reviewt. Wichtige korrigierte Fehler (erklärt,
+warum der Code heute so aussieht):
+
+| Fehler | Wirkung | Fix |
+|---|---|---|
+| `Position(**model_dump(), ticker=…)` doppeltes `ticker`-kwarg | jede Positionsanlage warf `TypeError` (500) | Dump kopieren, `ticker` darin setzen |
+| Agent-Endpunkte als POST, Frontend nutzt `EventSource` (GET) | Analyse startete nie (405) | Endpunkte auf GET (ADR-04) |
+| `day_pnl += (current ?? 0 - prev)` (Operator-Präzedenz) | Tages-P&L = ganzer Positionswert | korrekt geklammert: `((current ?? 0) - prev)` |
+| `portfolio_weight` über 1-Element-Liste | immer ~100 % | Summe über **alle** Positionen |
+| Sparplan-Ausführung ohne Position | FK-Verletzung (500) | Position bei Bedarf anlegen + `price > 0` prüfen |
+| blockierende yfinance-Aufrufe im async-Pfad | Event-Loop friert ein | `asyncio.to_thread` (ADR-08) |
+
+## Architektur-Verifikation (mit stärkerem Modell)
+
+Vor dem Umbau wurde die Architektur gezielt geprüft (Frage: „Ist das der beste Ansatz für den Use
+Case?"). Ergebnis: Stack bestätigt; einzige Paradigmen-Änderung = **Hybrid-Agent** (ADR-07), plus
+14B-Upgrade (ADR-06), Vorab-Cache (Warmup), LLM-Sentiment (ADR-09) und echtes Streaming.
