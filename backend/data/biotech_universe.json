@@ -1,0 +1,12 @@
+[
+  { "ticker": "CRSP", "name": "CRISPR Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "BEAM", "name": "Beam Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "EDIT", "name": "Editas Medicine", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "NTLA", "name": "Intellia Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "VERV", "name": "Verve Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "KYMR", "name": "Kymera Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "ARWR", "name": "Arrowhead Pharmaceuticals", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "RNA", "name": "Avidity Biosciences", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "AKRO", "name": "Akero Therapeutics", "exchange": "NASDAQ", "industry": "Biotechnology" },
+  { "ticker": "TERN", "name": "Terns Pharmaceuticals", "exchange": "NASDAQ", "industry": "Biotechnology" }
+]
