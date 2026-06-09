@@ -179,9 +179,10 @@ async def build_ensemble_decision(
 
     context = {
         "fundamentals": fundamentals,
-        "technicals": decision.technicals,  # concrete price levels for data-driven entry/exit marks
+        "technicals": decision.technicals,
         "news_sentiment": news_sentiment,
         "portfolio": portfolio_ctx,
         "price_points": len(prices),
+        "has_price_data": len(prices) > 0,
     }
     return decision, context

@@ -103,7 +103,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         type: 'buy',
         shares: data.shares,
         price: data.buyPrice,
-        date: new Date().toISOString().split('T')[0],
+        date: new Date().toISOString().split('T')[0]!,
         realized_pnl: null,
       })
     }

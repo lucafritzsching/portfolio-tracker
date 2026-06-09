@@ -2,7 +2,7 @@
 
 Phase 1+2 (deterministic, agent/pipeline.py) compute the authoritative decision.
 Phase 3 lets the LLM investigate via tools (visible in the UI).
-Phase 4 streams the LLM's German explanation of the decision (real token streaming).
+Phase 4 streams the LLM's German explanation of the decision (gated via evidence catalog).
 The LLM never overrides the decision — it only explains it.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.data_science import EnsembleDecision
+from agent.evidence import build_evidence_catalog, format_catalog_for_prompt, EvidenceCatalog
 from agent.pipeline import build_ensemble_decision, build_portfolio_snapshot
 from agent.tools import TOOL_DEFINITIONS, ToolExecutor
 from agent.prompts import (
@@ -22,7 +23,8 @@ from agent.prompts import (
     CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT, NEWS_SUMMARY_PROMPT, REBALANCE_PROMPT,
 )
 from config import settings
-from eval.faithfulness import check_faithfulness
+from eval.faithfulness import check_faithfulness, apply_faithfulness_gate
+from agent.evidence import render as render_evidence
 from models import Position, AnalysisResult, AnalysisMetric
 from services.market_data import fetch_and_store_news
 
@@ -34,6 +36,12 @@ _COMPONENT_LABELS = {
     "news": "News-Sentiment",
     "portfolio_rule": "Portfolio-Regel",
 }
+
+NO_DATA_MSG = (
+    "## Keine Analyse möglich\n\n"
+    "Für diesen Ticker liegen **keine Kursdaten** vor. "
+    "Es wird keine Empfehlung erzeugt — bitte Ticker prüfen oder „Daten vorbereiten“ ausführen."
+)
 
 
 def _format_components(decision: EnsembleDecision) -> str:
@@ -65,31 +73,37 @@ def render_decision_block(ticker: str, decision: EnsembleDecision) -> str:
     )
 
 
+async def _gated_explanation_chunks(raw: str, catalog: EvidenceCatalog) -> AsyncGenerator[str, None]:
+    """Render evidence placeholders, gate sentences, yield in chunks for SSE."""
+    rendered = render_evidence(raw, catalog)
+    gated = apply_faithfulness_gate(rendered, catalog)
+    chunk_size = 120
+    for i in range(0, len(gated), chunk_size):
+        yield gated[i : i + chunk_size]
+
+
 async def analyze_stock_stream(
     ticker: str,
     db: AsyncSession,
     current_prices: dict[str, float],
     agentic: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Stream a single-stock analysis: deterministic decision first, then LLM explanation.
-
-    agentic=False (default): the explanation streams directly from the pre-gathered context (fast).
-    agentic=True: the LLM investigates via tools first (visible in the UI), then explains — slower
-    but demonstrates autonomous agent behaviour.
-    """
+    """Stream a single-stock analysis: deterministic decision first, then gated LLM explanation."""
     ticker = ticker.upper()
 
-    # Phase 1 + 2: deterministic data collection and decision.
     decision, context = await build_ensemble_decision(ticker, db, current_prices)
+
+    if not context.get("has_price_data", context.get("price_points", 0) > 0):
+        yield NO_DATA_MSG
+        return
 
     block = render_decision_block(ticker, decision)
     yield block
     full_response = block
 
-    # Phase 3: the deterministic pipeline already gathered prices, indicators,
-    # fundamentals and news (all in `context`), so we hand that to the LLM and
-    # stream its German explanation directly — no redundant tool round-trips,
-    # which keeps the local 14B model responsive enough for live use.
+    catalog = build_evidence_catalog(ticker, decision, context)
+    evidence_block = format_catalog_for_prompt(catalog)
+
     user_prompt = EXPLAIN_STOCK_PROMPT.format(
         ticker=ticker,
         signal=decision.signal,
@@ -97,6 +111,7 @@ async def analyze_stock_stream(
         confidence=decision.confidence,
         components=_format_components(decision),
         rationale="\n".join(f"- {r}" for r in decision.rationale),
+        evidence_catalog=evidence_block,
         context=json.dumps(context, ensure_ascii=False, default=str),
     )
     messages = [
@@ -106,20 +121,29 @@ async def analyze_stock_stream(
 
     stats: dict = {}
     explanation = ""
+
     if agentic:
         executor = ToolExecutor(db=db, current_prices=current_prices)
-        async for chunk in _run_agent_loop(messages, executor, stats):
+        raw_explanation = ""
+        async for chunk in _run_agent_loop(messages, executor, stats, stream_final=False):
+            if chunk.startswith("\n\n> 🔧"):
+                full_response += chunk
+                yield chunk
+            else:
+                raw_explanation += chunk
+        async for chunk in _gated_explanation_chunks(raw_explanation, catalog):
             explanation += chunk
             full_response += chunk
             yield chunk
     else:
-        async for chunk in _stream_ollama_response(messages, stats):
+        raw = await _fetch_ollama_response(messages, stats)
+        async for chunk in _gated_explanation_chunks(raw, catalog):
             explanation += chunk
             full_response += chunk
             yield chunk
 
     db.add(AnalysisResult(ticker=ticker, analysis_text=full_response, model=settings.ollama_model))
-    await _record_metric(db, ticker, decision, explanation, stats)
+    await _record_metric(db, ticker, decision, explanation, stats, catalog)
     await db.commit()
 
 
@@ -127,13 +151,13 @@ MAX_TOOL_ITERATIONS = 5
 
 
 async def _run_agent_loop(
-    messages: list[dict], executor: ToolExecutor, stats: dict | None = None, show_tools: bool = True
+    messages: list[dict],
+    executor: ToolExecutor,
+    stats: dict | None = None,
+    show_tools: bool = True,
+    stream_final: bool = True,
 ) -> AsyncGenerator[str, None]:
-    """Tool-use loop: the LLM may call tools; the final answer is streamed.
-
-    show_tools=True surfaces each tool call as a visible line (used in the analysis view);
-    show_tools=False keeps them hidden so only the final answer is shown (used in chat).
-    """
+    """Tool-use loop: the LLM may call tools; the final answer is streamed or returned as one block."""
     iteration = 0
     while iteration < MAX_TOOL_ITERATIONS:
         iteration += 1
@@ -158,12 +182,14 @@ async def _run_agent_loop(
         message = data.get("message", {})
         tool_calls = message.get("tool_calls", [])
         if not tool_calls:
-            # Fallback: qwen3 sometimes emits tool calls as plain-text JSON in the content
-            # instead of the structured tool_calls field. Recover them so the loop still works.
             tool_calls = _extract_text_tool_calls(message.get("content", ""))
         if not tool_calls:
-            async for token in _stream_ollama_response(messages, stats):
-                yield token
+            if stream_final:
+                async for token in _stream_ollama_response(messages, stats):
+                    yield token
+            else:
+                text = await _fetch_ollama_response(messages, stats)
+                yield text
             return
 
         messages.append({"role": "assistant", "content": message.get("content", ""), "tool_calls": tool_calls})
@@ -182,8 +208,12 @@ async def _run_agent_loop(
             messages.append({"role": "tool", "content": tool_result})
 
     messages.append({"role": "user", "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung."})
-    async for token in _stream_ollama_response(messages, stats):
-        yield token
+    if stream_final:
+        async for token in _stream_ollama_response(messages, stats):
+            yield token
+    else:
+        text = await _fetch_ollama_response(messages, stats)
+        yield text
 
 
 def _fmt_args(args: dict) -> str:
@@ -191,8 +221,6 @@ def _fmt_args(args: dict) -> str:
 
 
 def _extract_text_tool_calls(content: str) -> list[dict]:
-    """Recover tool calls a model emitted as plain-text JSON (one {"name":…, "arguments":…} per line)
-    instead of in the structured tool_calls field. Returns them in the structured shape."""
     if not content or '"name"' not in content or '"arguments"' not in content:
         return []
     calls = []
@@ -215,16 +243,16 @@ async def _record_metric(
     decision: EnsembleDecision,
     explanation: str,
     stats: dict,
+    catalog: EvidenceCatalog | None = None,
 ) -> None:
-    """Persist latency/throughput + faithfulness for one analysis run (best-effort)."""
     try:
         eval_count = stats.get("eval_count")
-        eval_duration = stats.get("eval_duration")  # nanoseconds
+        eval_duration = stats.get("eval_duration")
         tok_per_sec = (
             round(eval_count / (eval_duration / 1e9), 2)
             if eval_count and eval_duration else None
         )
-        faith = check_faithfulness(decision, explanation)
+        faith = check_faithfulness(decision, explanation, catalog)
         db.add(AnalysisMetric(
             ticker=ticker,
             model=settings.ollama_model,
@@ -240,14 +268,13 @@ async def _record_metric(
             faithfulness_notes=faith["notes"] or None,
         ))
     except Exception:
-        pass  # metrics are observability, never break the analysis itself
+        pass
 
 
 async def analyze_portfolio_stream(
     db: AsyncSession,
     current_prices: dict[str, float],
 ) -> AsyncGenerator[str, None]:
-    """Stream a portfolio-wide analysis: per-position deterministic decisions, then LLM summary."""
     positions = (await db.execute(select(Position))).scalars().all()
     if not positions:
         yield "Keine Positionen im Portfolio."
@@ -258,9 +285,12 @@ async def analyze_portfolio_stream(
     yield "## Deterministische Bewertung je Position\n\n"
     decision_lines = []
     for pos in positions:
-        decision, _ctx = await build_ensemble_decision(pos.ticker, db, current_prices)
-        line = (f"- **{pos.ticker}** ({pos.name}): {decision.signal} "
-                f"(Score {decision.score:+.2f}, Konfidenz {decision.confidence:.0%})")
+        decision, ctx = await build_ensemble_decision(pos.ticker, db, current_prices)
+        if not ctx.get("has_price_data", ctx.get("price_points", 0) > 0):
+            line = f"- **{pos.ticker}** ({pos.name}): NO_DATA"
+        else:
+            line = (f"- **{pos.ticker}** ({pos.name}): {decision.signal} "
+                    f"(Score {decision.score:+.2f}, Konfidenz {decision.confidence:.0%})")
         decision_lines.append(line)
         yield line + "\n"
 
@@ -274,21 +304,15 @@ async def analyze_portfolio_stream(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
-    # Portfolio summary is narrative — stream directly without the per-ticker tool loop.
-    async for chunk in _stream_ollama_response(messages):
-        yield chunk
+    raw = await _fetch_ollama_response(messages)
+    chunk_size = 120
+    for i in range(0, len(raw), chunk_size):
+        yield raw[i : i + chunk_size]
 
-
-# ── GenAI features ────────────────────────────────────────────────────────────
 
 async def chat_stream(
     question: str, db: AsyncSession, current_prices: dict[str, float]
 ) -> AsyncGenerator[str, None]:
-    """Answer a free-text question about the portfolio, grounded in a live snapshot.
-
-    The chat is agentic: the LLM may call tools (get_fundamentals, run_statistical_model, …) to
-    pull LIVE data for ANY ticker — also stocks NOT in the portfolio — and base its answer on that.
-    """
     snapshot = await build_portfolio_snapshot(db, current_prices)
     held = [p["ticker"] for p in snapshot["positions"]]
     messages = [
@@ -305,7 +329,6 @@ async def chat_stream(
 
 
 async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[str, None]:
-    """Summarize the latest cached news for a ticker into themes + risks."""
     ticker = ticker.upper()
     news = await fetch_and_store_news(ticker, db, days=14)
     if not news:
@@ -319,14 +342,15 @@ async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[s
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": NEWS_SUMMARY_PROMPT.format(ticker=ticker, name=name, headlines=headlines)},
     ]
-    async for chunk in _stream_ollama_response(messages):
-        yield chunk
+    raw = await _fetch_ollama_response(messages)
+    chunk_size = 120
+    for i in range(0, len(raw), chunk_size):
+        yield raw[i : i + chunk_size]
 
 
 async def rebalance_stream(
     db: AsyncSession, current_prices: dict[str, float]
 ) -> AsyncGenerator[str, None]:
-    """Generate diversification analysis + rebalancing suggestions from a portfolio snapshot."""
     snapshot = await build_portfolio_snapshot(db, current_prices)
     if not snapshot["positions"]:
         yield "Keine Positionen im Portfolio."
@@ -337,23 +361,43 @@ async def rebalance_stream(
             snapshot=json.dumps(snapshot, ensure_ascii=False, default=str),
         )},
     ]
-    async for chunk in _stream_ollama_response(messages):
-        yield chunk
+    raw = await _fetch_ollama_response(messages)
+    chunk_size = 120
+    for i in range(0, len(raw), chunk_size):
+        yield raw[i : i + chunk_size]
+
+
+async def _fetch_ollama_response(
+    messages: list[dict], stats: dict | None = None
+) -> str:
+    """Non-streaming Ollama /api/chat — full response text."""
+    payload = {
+        "model": settings.ollama_model,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.3},
+    }
+    async with httpx.AsyncClient(timeout=180) as client:
+        try:
+            resp = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            if stats is not None:
+                stats.update(data)
+            return data.get("message", {}).get("content", "")
+        except Exception as e:
+            return f"\n\n[Fehler bei Ollama-Anfrage: {e}]"
 
 
 async def _stream_ollama_response(
     messages: list[dict], stats: dict | None = None
 ) -> AsyncGenerator[str, None]:
-    """Real token streaming from Ollama /api/chat (no tools, so the output is pure text).
-
-    If `stats` is provided, the final message's Ollama timing fields are written into
-    it (durations in nanoseconds) so callers can record latency/throughput metrics.
-    """
     payload = {
         "model": settings.ollama_model,
         "messages": messages,
         "stream": True,
-        "think": False,  # qwen3 is a thinking model; disable to avoid slow <think> output
+        "think": False,
         "options": {"temperature": 0.3},
     }
     async with httpx.AsyncClient(timeout=180) as client:

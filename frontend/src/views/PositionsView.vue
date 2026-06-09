@@ -14,7 +14,7 @@ const { getSignal } = useSignal()
 const expandedTicker = ref<string | null>(null)
 const showTxModal = ref(false)
 const txTicker = ref('')
-const txForm = ref({ type: 'buy' as 'buy' | 'sell', shares: '', price: '', date: new Date().toISOString().split('T')[0] })
+const txForm = ref({ type: 'buy' as 'buy' | 'sell', shares: '', price: '', date: new Date().toISOString().split('T')[0]! })
 const txSaving = ref(false)
 const txError = ref('')
 
@@ -24,7 +24,7 @@ function toggleHistory(ticker: string) {
 
 function openTxModal(ticker: string) {
   txTicker.value = ticker
-  txForm.value = { type: 'buy', shares: '', price: '', date: new Date().toISOString().split('T')[0] }
+  txForm.value = { type: 'buy', shares: '', price: '', date: new Date().toISOString().split('T')[0]! }
   txError.value = ''
   showTxModal.value = true
 }
