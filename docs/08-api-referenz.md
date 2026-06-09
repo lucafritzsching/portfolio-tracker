@@ -48,10 +48,20 @@ Ticker werden serverseitig in Großbuchstaben normalisiert.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| GET | `/analyze/{ticker}?current_prices=<json>` | **SSE-Stream** Einzelanalyse. `current_prices` = URL-encodiertes JSON `{ "AAPL": 185.0 }`. Liefert: deterministischen Block → Tool-Aufrufe → gestreamte Begründung. Endet mit `data: [DONE]`. |
+| GET | `/analyze/{ticker}?current_prices=<json>&agentic=false` | **SSE-Stream** Einzelanalyse. Liefert: deterministischen Block → (optional Tool-Aufrufe bei `agentic=true`) → **Evidence-gegate** Begründung. Endet mit `data: [DONE]`. |
 | GET | `/analyze-portfolio?current_prices=<json>` | **SSE-Stream** Portfolio-Analyse (Ensemble je Position + LLM-Zusammenfassung) |
+| GET | `/chat?question=<text>&current_prices=<json>` | **SSE-Stream** Freitext-Chat mit Tool-Agent |
+| GET | `/news-summary/{ticker}` | **SSE-Stream** News-Zusammenfassung (Themen + Risiken) |
+| GET | `/rebalance?current_prices=<json>` | **SSE-Stream** Diversifikations-/Rebalancing-Vorschläge |
 | GET | `/status` | `{ ollama_reachable, model, model_available, available_models }` |
 | POST | `/pull-model` | Zieht das konfigurierte Modell; streamt den Fortschritt als SSE |
+
+## Eval (`/api/eval`) — v2.0-baseline
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| GET | `/metrics` | Aggregat + letzte 50 Analyse-Runs (`faithful_rate`, Latenz, Tokens/s) |
+| GET | `/backtest?horizon=20&step=5&tickers=AAPL,MSFT` | Walk-Forward-Backtest des Ensembles. Leere `tickers` = alle Portfolio-Positionen |
 
 ### SSE-Format
 Jede Nachricht ist eine Zeile `data: <text>\n\n`. Zeilenumbrüche im Inhalt sind als `\n` escaped

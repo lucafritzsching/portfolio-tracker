@@ -13,7 +13,8 @@ frontend/src/
 │   └── ui.ts               Pinia: aktive View, Modals, Sidebar
 ├── composables/
 │   ├── useFormatters.ts    fmt(), fmtPct(), fmtCurrency(), fmtDate(), fmtLargeNumber()
-│   └── useSignal.ts        getSignal() (Verkaufen/Nachkaufen/Beobachten/Halten)
+│   ├── useSignal.ts        getSignal() (Verkaufen/Nachkaufen/Beobachten/Halten)
+│   └── useMarkdown.ts      Markdown-Rendering für Agent-Output
 ├── components/
 │   ├── AppHeader.vue        Topbar + Desktop-Navigation + Aktionen
 │   ├── AppSidebar.vue       Mobile-Sidebar
@@ -24,7 +25,9 @@ frontend/src/
 │   ├── PositionsView.vue    Positionskarten, Transaktionshistorie, Transaktions-Modal
 │   ├── SavingsView.vue      Sparpläne anlegen/ausführen
 │   ├── NewsView.vue         News je Position (Finnhub) inkl. Sentiment
-│   └── AnalysisView.vue     KI-Analyse (SSE-Stream) — das Showcase
+│   ├── AnalysisView.vue     KI-Analyse (SSE-Stream) — das Showcase
+│   ├── ChatView.vue         KI-Chat (freie Fragen, Tool-Agent)
+│   └── EvalView.vue         Agent-Metriken + Ensemble-Backtest
 └── assets/main.css          Design-System (CSS Custom Properties, Light/Dark)
 ```
 

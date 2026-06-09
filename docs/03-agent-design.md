@@ -29,11 +29,12 @@ Phase 2  Deterministische Entscheidung (KEIN LLM)  → agent/data_science.py  (c
          Technik + ARIMA + RandomForest + Fundamentaldaten + News + Portfolio-Regeln
          → gewichtetes Ensemble → BUY/HOLD/SELL + Konfidenz + Komponenten-Breakdown
                                   │
-Phase 3  LLM-Pass MIT Tools (sichtbar)             → agent/orchestrator.py  (_run_agent_loop)
-         LLM ruft Tools auf (live in der UI), erhält die EnsembleDecision im Kontext
+Phase 3  LLM-Pass MIT Tools (optional)        → agent/orchestrator.py  (_run_agent_loop)
+         Standard: agentic=false (schnell). Checkbox in UI aktiviert sichtbare Tool-Aufrufe.
                                   │
-Phase 4  LLM erklärt die Entscheidung (Streaming)  → agent/orchestrator.py  (_stream_ollama_response)
-         echtes Token-für-Token-Streaming der deutschen Begründung
+Phase 4  LLM erklärt + Evidence-Gate          → evidence.py + eval/faithfulness.py
+         Katalog {{ev:id}} → render → Satz-Gate → SSE-Chunks (v2.0-baseline)
+         Bei fehlenden Kursdaten: NO_DATA (kein LLM)
 ```
 
 Code-Einstieg: `agent/orchestrator.py → analyze_stock_stream()`.
@@ -105,15 +106,21 @@ Das LLM bekommt die Tool-Definitionen (`agent/tools.py`) und die bereits berechn
 `get_historical_prices`, `calculate_technical_indicators`, `get_fundamentals`, `get_news`,
 `run_statistical_model`, `get_portfolio_context`.
 
-Der Loop läuft max. `MAX_TOOL_ITERATIONS = 8`. Nicht-streamende Aufrufe dienen der Tool-Erkennung;
-sobald keine Tool-Calls mehr kommen, folgt Phase 4.
+Der Loop läuft max. `MAX_TOOL_ITERATIONS = 5`. **Standard in der UI:** `agentic=false` — Phase 3
+entfällt, der Kontext aus Phase 1 reicht für Phase 4. Mit Checkbox „Agent-Modus" werden Tools
+sichtbar ausgeführt, danach dieselbe Evidence-Pipeline.
 
-## Phase 4 – Erklärung mit echtem Streaming (`_stream_ollama_response`)
+## Phase 4 – Erklärung mit Evidence-Gate (v2.0-baseline)
 
-Die finale Begründung wird **echt token-weise** von Ollama gestreamt (`stream: true`, via
-`httpx.AsyncClient.stream`, JSON-Zeilen). Der Prompt (`EXPLAIN_STOCK_PROMPT` in `agent/prompts.py`)
-weist das LLM an, **das vorgegebene Signal zu begründen, nicht zu überstimmen**; Vorbehalte sind als
-Risiken zu formulieren. Struktur der Antwort: Begründung → Wichtigste Treiber → Risiken → Fazit.
+1. `build_evidence_catalog()` sammelt kanonische Zahlen aus Pipeline + Context (`agent/evidence.py`).
+2. LLM erhält `evidence_catalog` im Prompt; Zahlen nur als `{{ev:id}}` (`agent/prompts.py`).
+3. Antwort non-stream von Ollama → `render()` ersetzt Platzhalter → `apply_faithfulness_gate()`
+   entfernt Sätze mit ungedeckten Zahlen (`eval/faithfulness.py`).
+4. Gegate Text wird in SSE-Chunks an die UI gesendet.
+
+Bei `has_price_data == false`: **NO_DATA**, kein LLM-Aufruf.
+
+Ausführliches Release-Protokoll: [09-release-v2.0-baseline.md](09-release-v2.0-baseline.md).
 
 ## News-Sentiment (`agent/sentiment.py`)
 

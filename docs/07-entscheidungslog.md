@@ -83,6 +83,27 @@ Sentiment-Score; Keyword-Variante bleibt Offline-Fallback.
 **Begründung:** Weniger Angriffsfläche, schlankere Builds, klarere Codebasis.
 **Konsequenz:** Indikatoren bleiben in `data_science.py` selbst implementiert.
 
+## ADR-11 – Evidence-Katalog + Faithfulness-Gate gegen LLM-Halluzinationen (v2.0-baseline)
+**Kontext:** Das lokale Modell (`qwen3:14b`) erfindet in der Erklärungsschicht Kurse, RSI-Werte und
+Prozente, obwohl die Pipeline korrekte Zahlen liefert. Prompt-Regeln allein reichen nicht.
+**Entscheidung:** Vor dem LLM-Aufruf wird ein **Evidence-Katalog** aus Pipeline-Daten gebaut
+(`agent/evidence.py`). Das LLM referenziert Zahlen nur als `{{ev:id}}`. Nach der Antwort prüft
+`eval/faithfulness.py` jeden Satz und entfernt ungedeckte Aussagen. Bei fehlenden Kursdaten: **NO_DATA**
+ohne LLM-Call.
+**Begründung:** Die Entscheidung bleibt deterministisch; das Risiko liegt nur in der Erklärung.
+Gate + Platzhalter machen Halluzinationen für die Demo nachweisbar reduzierbar (`AnalysisMetric.faithful`).
+**Konsequenz / Trade-off:** Erklärung wird non-stream geholten, dann gegated und in Chunks gesendet
+(kurzer Delay statt Live-Tokens). Chat/Portfolio/Rebalance haben das Gate noch nicht.
+**Details:** [09-release-v2.0-baseline.md](09-release-v2.0-baseline.md)
+
+## ADR-12 – Git-Branching für parallele Strategie-Teams (v2.0-baseline)
+**Kontext:** Zwei Gruppen testen unterschiedliche Investment-Strategien (Alt A: deterministisch/Bollinger;
+Alt B: News-Narrativ) auf derselben Codebasis.
+**Entscheidung:** Ein Repo, vier Branches: `main` (stabil), `develop` (Integration),
+`feature/strategy-alt-a`, `feature/strategy-alt-b`. Tag `v2.0-baseline` auf `main`.
+**Begründung:** Kein doppeltes Setup/CI; gemeinsame Baseline-Fixes zentral, Strategie-Code isoliert.
+**Konsequenz:** Strategie-Module (Screener, Insider, …) nur in Feature-Branches, nicht in `main`.
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)

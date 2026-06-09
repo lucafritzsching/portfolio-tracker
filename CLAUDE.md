@@ -32,7 +32,8 @@ Human- and agent-facing docs live in [`docs/`](docs/README.md) (German). Start t
 vision ([01](docs/01-vision-und-ziele.md)), architecture + trade-offs ([02](docs/02-architektur.md)),
 **the hybrid agent** ([03](docs/03-agent-design.md)), backend ([04](docs/04-backend.md)),
 frontend ([05](docs/05-frontend.md)), setup ([06](docs/06-setup-und-betrieb.md)),
-decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/08-api-referenz.md)).
+decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/08-api-referenz.md)),
+**release v2.0-baseline changelog** ([09](docs/09-release-v2.0-baseline.md)).
 
 ## Architecture (Production)
 
@@ -54,10 +55,10 @@ docker-compose up -d
 
 ### 2. Pull the AI model (first time only)
 ```bash
-docker exec portfaio-ollama ollama pull qwen2.5:14b
+docker exec portfaio-ollama ollama pull qwen3:14b
 # or via the UI: KI-Analyse → "Modell laden"
 ```
-Default model is `qwen2.5:14b` (needs ~9 GB, comfortable on 16 GB Apple Silicon).
+Default model is `qwen3:14b` (see `backend/config.py`; needs ~9 GB on 16 GB Apple Silicon).
 Fallback for low-RAM machines: set `OLLAMA_MODEL=qwen2.5:7b` in `backend/.env`.
 
 ### 3. Start FastAPI backend
@@ -90,8 +91,12 @@ Open http://localhost:5173
 | `backend/routers/portfolio.py` | CRUD for positions, transactions, savings plans; `/import` for localStorage migration |
 | `backend/routers/quotes.py` | Finnhub stock price proxy |
 | `backend/routers/market_data.py` | Historical prices, fundamentals, news (yfinance + Finnhub) |
-| `backend/routers/agent.py` | **SSE streaming agent endpoint** `/api/agent/analyze/{ticker}` |
-| `backend/agent/orchestrator.py` | **Agent loop**: tool-calling → Ollama → tool-calling → final SSE stream |
+| `backend/routers/agent.py` | **SSE streaming agent** `/api/agent/analyze/{ticker}` (+ chat, rebalance, news) |
+| `backend/routers/eval.py` | Eval metrics + ensemble backtest |
+| `backend/agent/orchestrator.py` | Hybrid agent: pipeline → evidence-gated LLM explanation |
+| `backend/agent/evidence.py` | Evidence catalog + `{{ev:id}}` render (anti-hallucination) |
+| `backend/eval/faithfulness.py` | Sentence-level faithfulness gate |
+| `backend/eval/backtest.py` | Walk-forward backtest of ensemble signals |
 | `backend/agent/tools.py` | Tool definitions (Qwen tool-calling format) + ToolExecutor |
 | `backend/agent/data_science.py` | Technical indicators, ARIMA forecast, Random Forest signal |
 | `backend/agent/prompts.py` | German prompt templates |
@@ -104,7 +109,9 @@ Open http://localhost:5173
 | `frontend/src/api/client.ts` | Typed fetch wrappers for all backend endpoints + EventSource for SSE |
 | `frontend/src/stores/portfolio.ts` | Pinia store: positions, transactions, savings plans, stats |
 | `frontend/src/stores/ui.ts` | Pinia store: active view, modals |
-| `frontend/src/views/AnalysisView.vue` | **Main feature**: KI-Analyse with SSE EventSource streaming |
+| `frontend/src/views/AnalysisView.vue` | **Main feature**: KI-Analyse with SSE streaming |
+| `frontend/src/views/ChatView.vue` | KI-Chat (free-text, tool agent) |
+| `frontend/src/views/EvalView.vue` | Agent metrics + ensemble backtest |
 | `frontend/src/views/DashboardView.vue` | Metrics, charts, positions table |
 | `frontend/src/views/PositionsView.vue` | Position cards, transaction history, transaction modal |
 | `frontend/src/views/SavingsView.vue` | Savings plans management |
@@ -122,22 +129,30 @@ Open http://localhost:5173
 **fundamentals_cache** — P/E, market_cap, EPS, revenue_growth, 52w high/low, beta, dividend_yield
 **news_cache** — ticker, headline, summary, url, published_at, sentiment
 **analysis_results** — ticker, analysis_text, model, created_at
+**analysis_metrics** — per-run signal, score, faithfulness, latency (eval)
+
+## Git branches (v2.0-baseline)
+
+- `main` — stable baseline (tag `v2.0-baseline`)
+- `develop` — integration
+- `feature/strategy-alt-a` — deterministic / Bollinger biotech screen
+- `feature/strategy-alt-b` — news narrative / turnaround / insider
 
 ## Agent Architecture
 
-The Ollama agent uses **Qwen 2.5 tool-calling**:
-1. Frontend sends POST to `/api/agent/analyze/{ticker}` → SSE stream
-2. FastAPI builds context from PostgreSQL, calls Ollama with tool definitions
-3. Agent calls tools: `get_historical_prices`, `calculate_technical_indicators`, `get_fundamentals`, `get_news`, `run_statistical_model`, `get_portfolio_context`
-4. DS pipeline: RSI, MACD, Bollinger, ARIMA forecast, Random Forest Buy/Hold/Sell
-5. Agent synthesizes → final recommendation streams token-by-token to frontend
+Hybrid agent (see [docs/03-agent-design.md](docs/03-agent-design.md), [docs/09-release-v2.0-baseline.md](docs/09-release-v2.0-baseline.md)):
+1. Frontend opens **GET** `/api/agent/analyze/{ticker}?current_prices=…` → SSE stream
+2. Phase 1+2: deterministic pipeline → BUY/HOLD/SELL + score (no LLM)
+3. Phase 3 (optional, `agentic=true`): tool loop with visible tool calls
+4. Phase 4: LLM explains using `{{ev:id}}` placeholders → evidence render → faithfulness gate → SSE chunks
+5. NO_DATA abort if no price history (no fabricated recommendation)
 
 ## Environment Variables (backend/.env)
 
 ```
 DATABASE_URL=postgresql+asyncpg://portfaio:portfaio@localhost:5432/portfaio
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:14b
+OLLAMA_MODEL=qwen3:14b
 FINNHUB_API_KEY=<your key from finnhub.io>
 NEWS_API_KEY=<optional, newsapi.org>
 ```
