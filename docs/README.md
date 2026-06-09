@@ -20,6 +20,7 @@ Diese Dokumentation richtet sich an **Teammitglieder und KI-Agenten** und erklä
 | 6 | [06-setup-und-betrieb.md](06-setup-und-betrieb.md) | Installation, Start, Umgebungsvariablen, API-Keys, Modell |
 | 7 | [07-entscheidungslog.md](07-entscheidungslog.md) | Chronologische Architektur-Entscheidungen (ADRs) |
 | 8 | [08-api-referenz.md](08-api-referenz.md) | Alle HTTP-Endpunkte |
+| 9 | **[09-release-v2.0-baseline.md](09-release-v2.0-baseline.md)** | **Release v2.0-baseline: Evidence-Gate, Eval, Chat, Branching, Changelog** |
 
 ## 30-Sekunden-Überblick
 
@@ -27,7 +28,7 @@ Diese Dokumentation richtet sich an **Teammitglieder und KI-Agenten** und erklä
 Browser (Vue 3 SPA)  ──HTTP/SSE──►  FastAPI Backend  ──►  PostgreSQL (Daten + Cache)
    localhost:5173                     localhost:8000        localhost:5432
                                           │
-                                          ├──►  Ollama (Qwen 2.5 14B)   localhost:11434   (lokales LLM)
+                                          ├──►  Ollama (Qwen 3 14B)     localhost:11434   (lokales LLM)
                                           ├──►  yfinance                (Kurse, Fundamentaldaten)
                                           └──►  Finnhub                 (Quotes, News)
 ```
@@ -36,14 +37,19 @@ Browser (Vue 3 SPA)  ──HTTP/SSE──►  FastAPI Backend  ──►  Postgr
 Data-Science-Pipeline (gewichtetes Ensemble). Das LLM **trifft die Entscheidung nicht**, sondern
 *begründet* sie nachvollziehbar. Details in [03-agent-design.md](03-agent-design.md).
 
-## Projektstand (Stand dieser Dokumentation)
+## Projektstand (Stand v2.0-baseline)
 
 - ✅ Backend (FastAPI) inkl. Portfolio-CRUD, Marktdaten-Services, Agent
-- ✅ Hybrid-Agent: deterministisches Ensemble + LLM-Erklärung mit echtem Token-Streaming
-- ✅ Frontend (Vue 3 + TypeScript), 5 Views, SSE-Anbindung
+- ✅ Hybrid-Agent: deterministisches Ensemble + **Evidence-gesicherte** LLM-Erklärung
+- ✅ Frontend (Vue 3 + TypeScript), 7 Views (inkl. Chat + Eval), SSE-Anbindung
+- ✅ Eval: Metriken (`AnalysisMetric`), Ensemble-Backtest, Faithfulness-Rate
+- ✅ Anti-Halluzination: Evidence-Katalog + Satz-Gate ([09-release-v2.0-baseline.md](09-release-v2.0-baseline.md))
+- ✅ Git: `main` + `develop` + `feature/strategy-alt-a` / `alt-b`
 - ✅ Docker-Compose (PostgreSQL + Ollama + Backend)
-- ⏳ Offen: End-to-End-Lauf auf dem Demo-Laptop (braucht Docker + Ollama + Modell-Pull),
-  optionale Sample-/Demo-Daten beim Erststart
+- ⏳ Strategie-Screener (Biotech/Bollinger vs. News-Narrativ) — in Feature-Branches
+- ⏳ Evidence-Gate für Chat/Portfolio/Rebalance — geplant
+
+**Neu in dieser Version?** → [09-release-v2.0-baseline.md](09-release-v2.0-baseline.md)
 
 ## Für KI-Agenten / Claude Code
 
