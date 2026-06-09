@@ -104,6 +104,28 @@ Alt B: News-Narrativ) auf derselben Codebasis.
 **Begründung:** Kein doppeltes Setup/CI; gemeinsame Baseline-Fixes zentral, Strategie-Code isoliert.
 **Konsequenz:** Strategie-Module (Screener, Insider, …) nur in Feature-Branches, nicht in `main`.
 
+## ADR-13 – Alt-B als event-basiertes, ehrliches Turnaround-Screening (Schicht 1)
+**Kontext:** Der erste Alt-B-Screener qualifizierte über „positive News ODER Insider" und bewertete
+News per Substring-Keyword – anfällig für Fehltreffer, fehlende Richtungserkennung und Fehlalarme bei
+hochgelaufenen Titeln oder Routine-/Recap-Meldungen. Eine harte Umsatz-Pflicht (`revenue_growth > 0`)
+schloss zudem Pre-Revenue-Biotechs aus, und der als „GenAI" gelabelte Block war reine Keyword-Logik.
+**Entscheidung:** Deterministischer Umbau in `services/event_strength.py` (rein, unit-getestet):
+- **Ereignis-Stärke 1–5**, nur ≥ 3 qualifiziert; Klassifikation per **Wortgrenzen-Regex** (kein
+  Substring) mit **Richtungs-/Negationserkennung** und **Quellen-Gating** (Firmen-PR = volle Stärke,
+  reine Kommentar-/Recap-Quellen gedeckelt).
+- **Relevanz-Filter** (nur ticker-/firmenspezifische News).
+- **Schwäche-/Setup-Gate** (ausgebombt + überverkauft) als Pflicht für „Turnaround".
+- **Gate = Setup UND Katalysator ≥ 3 UND kein Sektor-Abwärtstrend (XBI)**, danach Konfidenz-Stufen
+  mit ehrlichen Labels.
+- **Pre-Revenue-Fallback** im Basisfilter (kein Umsatz = ok, nur schrumpfender Umsatz fällt raus).
+**Begründung:** Ereignis-*Qualität* statt -Stimmung; Stärke + Setup + Recency zusammen verhindern die
+Fehlalarme. Alles bleibt deterministisch und über `decision_log`/`score_breakdown` erklärbar. Die
+Stärke-**Skala** bleibt menschlich im Code – ein LLM darf später nur den *Typ* klassifizieren; erst
+damit wird „GenAI" ehrlich.
+**Konsequenz / Trade-off:** Offen (Schicht 2–4): Live-/dynamisches Universum, Sektor aus Live-Quelle,
+SEC-8-K-Ereignis-Rückgrat, LLM-Stärke-Klassifikation und ein Backtest als Wirksamkeitsnachweis.
+Strategie-Code nur auf `feature/alt-b`.
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)
