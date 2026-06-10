@@ -2,10 +2,11 @@
 
 ## Voraussetzungen
 
-- **Docker** (für PostgreSQL + Ollama; optional auch fürs Backend)
-- **Python 3.12** (falls das Backend lokal statt im Container läuft)
+- **Docker** (für PostgreSQL + Backend)
+- **Ollama nativ installiert** (läuft auf dem Host, nicht im Container – nur so nutzt es
+  die Metal-GPU; der Backend-Container erreicht es über `host.docker.internal`)
 - **Node.js ≥ 20** (für das Frontend / Vite)
-- **Apple Silicon, ≥ 16 GB RAM** empfohlen (für Qwen 2.5 14B)
+- **Apple Silicon, ≥ 16 GB RAM** empfohlen (für Qwen3 14B)
 - Ein **Finnhub-API-Key** (kostenlos auf finnhub.io)
 
 ## Umgebungsvariablen & Secrets
@@ -16,39 +17,46 @@ Alle Secrets liegen in **`backend/.env`** (gitignored – nicht committen!). Vor
 ```env
 DATABASE_URL=postgresql+asyncpg://portfaio:portfaio@localhost:5432/portfaio
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:14b
+OLLAMA_MODEL=qwen3:14b
 FINNHUB_API_KEY=<dein-key>
 NEWS_API_KEY=
 ```
 
 - Der **Finnhub-Key ist bereits in `backend/.env` gesetzt** (vom Team eingetragen).
 - `docker-compose.yml` lädt `backend/.env` als `env_file` und überschreibt nur `DATABASE_URL`
-  und `OLLAMA_BASE_URL` mit den Container-internen Service-Namen (`postgres`, `ollama`).
-- **Lokaler Lauf** (ohne Docker-Backend) nutzt die `localhost`-Werte aus `backend/.env` direkt.
+  (Service-Name `postgres` im Compose-Netz) und `OLLAMA_BASE_URL`
+  (`host.docker.internal` → natives Ollama auf dem Host).
 
-## Start (empfohlen: Infrastruktur in Docker, App-Prozesse lokal)
+## Start (PostgreSQL + Backend in Docker, Ollama nativ, Frontend lokal)
 
 ```bash
-# 1) Infrastruktur: PostgreSQL + Ollama (+ Backend) starten
+# 1) PostgreSQL + Backend starten
 docker compose up -d
+docker logs -f portfaio-backend   # Backend-Logs (uvicorn --reload, Python 3.12)
 
-# 2) Modell einmalig ziehen (~9 GB)
-docker exec portfaio-ollama ollama pull qwen2.5:14b
+# 2) Modell einmalig ziehen (~9 GB) – nativ auf dem Host
+ollama pull qwen3:14b
 #   Low-RAM-Alternative: ollama pull qwen2.5:7b  und in backend/.env OLLAMA_MODEL=qwen2.5:7b
 
-# 3) Backend (falls nicht im Container) – aus backend/
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload         # http://localhost:8000  (Swagger: /docs)
-
-# 4) Frontend – aus frontend/
+# 3) Frontend – aus frontend/
 npm install
 npm run dev                       # http://localhost:5173
 ```
 
-> `docker compose up` startet auch einen Backend-Container (Port 8000, Hot-Reload via Volume-Mount).
-> Wer das Backend lieber lokal per `uvicorn` fährt, kann den `backend`-Service in der Compose-Datei
-> weglassen/stoppen – Port 8000 darf nur einmal belegt sein.
+> Das Backend läuft im Container `portfaio-backend` (Python 3.12). `./backend` ist nach `/app`
+> gemountet und uvicorn läuft mit `--reload` – Codeänderungen greifen sofort, kein Rebuild nötig.
+> Backend unter http://localhost:8000 (Swagger: /docs).
+
+## Tests (lokales venv)
+
+`backend/.venv` ist **Python 3.9** und dient ausschließlich den Unit-Tests – die App selbst
+kann es nicht laden (PEP-604-Annotations wie `float | None` in `models.py` brauchen ≥ 3.10).
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest tests/
+```
 
 ## Erststart-Ablauf in der App
 
@@ -63,7 +71,7 @@ npm run dev                       # http://localhost:5173
 
 | Schritt | Erwartung |
 |---|---|
-| `GET /api/agent/status` | `ollama_reachable: true`, `model_available: true` für `qwen2.5:14b` |
+| `GET /api/agent/status` | `ollama_reachable: true`, `model_available: true` für `qwen3:14b` |
 | Position anlegen | erscheint in DB-Tabelle `positions` |
 | „Daten vorbereiten" | `price_history`, `fundamentals_cache`, `news_cache` gefüllt |
 | Analyse starten | Stream: deterministischer Block, Tool-Calls (Backend-Logs), gestreamte Begründung |
@@ -75,12 +83,12 @@ npm run dev                       # http://localhost:5173
 
 | Symptom | Ursache / Lösung |
 |---|---|
-| „Ollama nicht erreichbar" | `docker compose up -d` vergessen, oder falscher `OLLAMA_BASE_URL` |
-| „Modell fehlt" | `ollama pull qwen2.5:14b` ausführen oder Button „Modell laden" |
+| „Ollama nicht erreichbar" | Natives Ollama läuft nicht (Ollama-App/`ollama serve` starten), oder falscher `OLLAMA_BASE_URL` |
+| „Modell fehlt" | `ollama pull qwen3:14b` (nativ auf dem Host) oder Button „Modell laden" |
 | Analyse bricht sofort ab | Agent-Endpunkte müssen **GET** sein (EventSource); CORS-Origin in `main.py` prüfen |
 | Keine News | `FINNHUB_API_KEY` fehlt/ungültig in `backend/.env` |
 | Kurse fehlen | yfinance temporär down → „Daten vorbereiten" nutzt Cache; später erneut versuchen |
-| DB-Fehler nach Modelländerung | Es gibt kein Migrationswerkzeug; Docker-Volume `postgres_data` neu anlegen |
+| DB-Fehler nach Modelländerung | `init_db()` macht nur `create_all` und ändert bestehende Tabellen nie. Betroffene Tabelle droppen: `docker exec -it portfaio-postgres psql -U portfaio -d portfaio -c 'DROP TABLE …;'` – Backend-Neustart legt sie neu an |
 
 ## Datenmigration aus dem Legacy-Prototyp (optional)
 

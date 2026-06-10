@@ -1,6 +1,6 @@
 import type {
   Position, Transaction, SavingsPlan, Quote, Fundamentals, NewsItem, AgentStatus,
-  EvalMetrics, Backtest,
+  EvalMetrics, Backtest, ScreenerResponse, ScreenerUniverseStatus,
 } from '@/types'
 
 const BASE = 'http://localhost:8000/api'
@@ -111,6 +111,17 @@ export const api = {
       const t = tickers.length ? `&tickers=${tickers.join(',')}` : ''
       return request<Backtest>(`/eval/backtest?horizon=${horizon}&step=${step}${t}`)
     },
+  },
+
+  // ── Screener ───────────────────────────────────────────────────────────────
+
+  screener: {
+    latest: () => request<ScreenerResponse>('/screener/alt-b/latest'),
+    scan: (limit = 12, minScore = 0): EventSource =>
+      new EventSource(`${BASE}/screener/alt-b/scan?limit=${limit}&min_score=${minScore}`),
+    universe: () => request<ScreenerUniverseStatus>('/screener/universe'),
+    universeRefresh: (): EventSource =>
+      new EventSource(`${BASE}/screener/universe/refresh`),
   },
 
   // ── Import ────────────────────────────────────────────────────────────────────

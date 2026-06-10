@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from decimal import Decimal
-from sqlalchemy import String, Numeric, Integer, Boolean, Date, DateTime, Text, ForeignKey, Index
+from sqlalchemy import JSON, String, Numeric, Integer, Boolean, Date, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
@@ -121,6 +121,29 @@ class AnalysisResult(Base):
     analysis_text: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ScreenerUniverse(Base):
+    """Gecachtes NASDAQ-Biotech-Universum (Finnhub-Crawl, wird selten erneuert)."""
+    __tablename__ = "screener_universe"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    industry: Mapped[str] = mapped_column(String(100), nullable=False)
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ScreenerRun(Base):
+    """Persistierter Alt-B-Scan: payload = komplette Screener-Antwort als JSON-Snapshot."""
+    __tablename__ = "screener_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="completed")
+    universe_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
 class AnalysisMetric(Base):
