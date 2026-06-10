@@ -45,7 +45,7 @@ Data-Science-Pipeline (gewichtetes Ensemble). Das LLM **trifft die Entscheidung 
 - ✅ Eval: Metriken (`AnalysisMetric`), Ensemble-Backtest, Faithfulness-Rate
 - ✅ Anti-Halluzination: Evidence-Katalog + Satz-Gate ([09-release-v2.0-baseline.md](09-release-v2.0-baseline.md))
 - ✅ Git: `main` + `develop` + `feature/strategy-alt-a` / `alt-b`
-- ✅ Docker-Compose (PostgreSQL + Ollama + Backend)
+- ✅ Docker-Compose (PostgreSQL + optionales Backend; Ollama läuft nativ auf dem Host)
 - ⏳ Strategie-Screener (Biotech/Bollinger vs. News-Narrativ) — in Feature-Branches
 - ⏳ Evidence-Gate für Chat/Portfolio/Rebalance — geplant
 

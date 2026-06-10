@@ -2,7 +2,9 @@
 
 ## Voraussetzungen
 
-- **Docker** (für PostgreSQL + Ollama; optional auch fürs Backend)
+- **Docker** (für PostgreSQL; optional auch fürs Backend)
+- **Ollama nativ auf dem Host** (NICHT in Docker – ein Container auf macOS ist CPU-only ohne
+  Metal/GPU und für ein 14B-Modell zu langsam/ressourcenhungrig). Installation: https://ollama.com/download
 - **Python 3.12** (falls das Backend lokal statt im Container läuft)
 - **Node.js ≥ 20** (für das Frontend / Vite)
 - **Apple Silicon, ≥ 16 GB RAM** empfohlen (für Qwen 2.5 14B)
@@ -23,17 +25,19 @@ NEWS_API_KEY=
 
 - Der **Finnhub-Key ist bereits in `backend/.env` gesetzt** (vom Team eingetragen).
 - `docker-compose.yml` lädt `backend/.env` als `env_file` und überschreibt nur `DATABASE_URL`
-  und `OLLAMA_BASE_URL` mit den Container-internen Service-Namen (`postgres`, `ollama`).
+  (→ Service-Name `postgres`) und `OLLAMA_BASE_URL` (→ `host.docker.internal:11434`, also das
+  host-native Ollama vom Backend-Container aus erreichbar).
 - **Lokaler Lauf** (ohne Docker-Backend) nutzt die `localhost`-Werte aus `backend/.env` direkt.
 
-## Start (empfohlen: Infrastruktur in Docker, App-Prozesse lokal)
+## Start (empfohlen: PostgreSQL in Docker, Ollama nativ, App-Prozesse lokal)
 
 ```bash
-# 1) Infrastruktur: PostgreSQL + Ollama (+ Backend) starten
-docker compose up -d
+# 1) PostgreSQL starten (Ollama läuft NATIV, nicht in Docker)
+docker compose up -d postgres
 
-# 2) Modell einmalig ziehen (~9 GB)
-docker exec portfaio-ollama ollama pull qwen2.5:14b
+# 2) Ollama nativ starten + Modell einmalig ziehen (~9 GB)
+ollama serve                      # entfällt, falls Ollama schon als Hintergrund-App läuft
+ollama pull qwen2.5:14b
 #   Low-RAM-Alternative: ollama pull qwen2.5:7b  und in backend/.env OLLAMA_MODEL=qwen2.5:7b
 
 # 3) Backend (falls nicht im Container) – aus backend/
@@ -75,7 +79,7 @@ npm run dev                       # http://localhost:5173
 
 | Symptom | Ursache / Lösung |
 |---|---|
-| „Ollama nicht erreichbar" | `docker compose up -d` vergessen, oder falscher `OLLAMA_BASE_URL` |
+| „Ollama nicht erreichbar" | Ollama nativ nicht gestartet (`ollama serve` / App), oder falscher `OLLAMA_BASE_URL` |
 | „Modell fehlt" | `ollama pull qwen2.5:14b` ausführen oder Button „Modell laden" |
 | Analyse bricht sofort ab | Agent-Endpunkte müssen **GET** sein (EventSource); CORS-Origin in `main.py` prüfen |
 | Keine News | `FINNHUB_API_KEY` fehlt/ungültig in `backend/.env` |

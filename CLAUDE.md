@@ -43,20 +43,26 @@ Full-stack local webapp. The old `index.html` prototype is kept as reference onl
 frontend/    Vue 3 + TypeScript + Vite   → localhost:5173
 backend/     Python FastAPI              → localhost:8000
              PostgreSQL (Docker)         → localhost:5432
-             Ollama (Docker)             → localhost:11434
+             Ollama (native host)        → localhost:11434
 ```
 
 ## Starting the App
 
-### 1. Start backend services (PostgreSQL + Ollama)
+> **Ollama runs natively on the host, not in Docker.** On macOS a container is CPU-only
+> (no Metal/GPU passthrough) and far too slow/heavy for a 14B model, so `docker-compose`
+> starts **only PostgreSQL** (plus an optional backend container). A native backend reaches
+> Ollama at `localhost:11434`; the backend *container* reaches it via `host.docker.internal:11434`.
+
+### 1. Start PostgreSQL (Docker)
 ```bash
-docker-compose up -d
+docker-compose up -d postgres
 ```
 
-### 2. Pull the AI model (first time only)
+### 2. Start Ollama + pull the model (native, first time only)
 ```bash
-docker exec portfaio-ollama ollama pull qwen3:14b
-# or via the UI: KI-Analyse → "Modell laden"
+# install once from https://ollama.com/download  (or: brew install ollama)
+ollama serve            # skip if Ollama already runs as a background app/service
+ollama pull qwen3:14b   # or via the UI: KI-Analyse → "Modell laden"
 ```
 Default model is `qwen3:14b` (see `backend/config.py`; needs ~9 GB on 16 GB Apple Silicon).
 Fallback for low-RAM machines: set `OLLAMA_MODEL=qwen2.5:7b` in `backend/.env`.
