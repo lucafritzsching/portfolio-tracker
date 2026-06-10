@@ -17,8 +17,13 @@ This module does the NL judgment only — it does not fetch data or score the st
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 
+import httpx
+
+from config import settings
 from services.event_strength import classify_event, is_relevant
 
 MIN_QUALIFY = 3        # strength >= 3 qualifies (mirrors event_strength qualifying threshold)
@@ -117,3 +122,103 @@ def combine_verdict(
         regex_strength=regex_strength,
         llm_strength=raw,
     )
+
+
+# ── LLM layer (Schicht 4: one batched "fast" judgment) ───────────────────────────
+
+_VERDICT_CACHE: dict[str, NLVerdict] = {}
+
+
+def _format_prompt(criterion: str, items: list[NLItem]) -> str:
+    numbered = "\n".join(f"{i}. {it.text}" for i, it in enumerate(items))
+    return (
+        "Du bewertest, ob eine Aktie aktuell ein bestimmtes Kriterium erfüllt — AUSSCHLIESSLICH "
+        f"auf Basis der folgenden Schlagzeilen.\n\nKriterium: „{criterion}“\n\n"
+        f"Schlagzeilen:\n{numbered}\n\n"
+        "Antworte NUR mit JSON, ohne weiteren Text:\n"
+        '{"matches": true|false, "strength": 1-5, "evidence": [Indizes], "reason": "kurze Begründung"}\n'
+        "strength: 1 = unbedeutend/Routine, 3 = relevant, 5 = transformativ. "
+        "evidence: nur Indizes der Schlagzeilen, die dein Urteil stützen. "
+        "Erfinde nichts; stützen die Schlagzeilen das Kriterium nicht, dann matches=false."
+    )
+
+
+def _parse_llm_response(text: str | None) -> dict | None:
+    """Extract the first JSON object from the model output; None if absent/invalid."""
+    if not text:
+        return None
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start : end + 1])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(obj, dict) or "matches" not in obj:
+        return None
+    return obj
+
+
+async def _call_ollama(criterion: str, items: list[NLItem]) -> dict | None:
+    """One batched judgment via the local Ollama model (temperature 0). None on any failure."""
+    payload = {
+        "model": settings.ollama_model,
+        "messages": [{"role": "user", "content": _format_prompt(criterion, items)}],
+        "stream": False,
+        "options": {"temperature": 0},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            text = resp.json().get("message", {}).get("content", "")
+    except Exception:
+        return None
+    return _parse_llm_response(text)
+
+
+def _cache_key(criterion: str, items: list[NLItem]) -> str:
+    blob = criterion + "::" + "|".join(it.text for it in items)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+async def evaluate_nl_target(
+    criterion: str,
+    items: list[NLItem],
+    ticker: str = "",
+    name: str = "",
+    *,
+    llm_fn=None,
+    cache: dict | None = None,
+) -> NLVerdict:
+    """Full evaluation: prefilter → (cached) batched LLM judgment → bounded verdict.
+
+    Only relevant, non-negative headlines reach the LLM, and at most one batched call is made
+    per (criterion, headlines) — so this stays cheap on a MacBook. ``llm_fn`` is injectable for
+    tests; the default is the local Ollama call. Only successful LLM verdicts are cached, so a
+    transient outage never poisons the cache with a fallback.
+    """
+    survivors, regex_strength, qualifying = prefilter(items, ticker, name)
+    if not survivors:
+        return NLVerdict(
+            matches=False, strength=0,
+            reason="Keine relevanten, nicht-negativen Schlagzeilen.",
+            evidence=[], source="no_signal", regex_strength=0, llm_strength=None,
+        )
+
+    cache = _VERDICT_CACHE if cache is None else cache
+    key = _cache_key(criterion, survivors)
+    if key in cache:
+        return cache[key]
+
+    fn = llm_fn or _call_ollama
+    try:
+        llm_result = await fn(criterion, survivors)
+    except Exception:
+        llm_result = None
+
+    verdict = combine_verdict(criterion, regex_strength, qualifying,
+                              [it.text for it in survivors], llm_result)
+    if verdict.source == "llm":
+        cache[key] = verdict
+    return verdict

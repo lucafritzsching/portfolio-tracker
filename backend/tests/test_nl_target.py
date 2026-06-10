@@ -1,5 +1,13 @@
-"""Tests for the deterministic NL-target core (prefilter + verdict combination)."""
-from services.nl_target import NLItem, combine_verdict, prefilter
+"""Tests for the NL-target evaluator (prefilter, verdict combination, LLM orchestrator)."""
+import asyncio
+
+from services.nl_target import (
+    NLItem,
+    _parse_llm_response,
+    combine_verdict,
+    evaluate_nl_target,
+    prefilter,
+)
 
 
 def _it(text, source=None):
@@ -52,3 +60,50 @@ def test_combine_regex_guardrail_blocks_fabrication():
 def test_combine_filters_invalid_evidence_indices():
     v = combine_verdict("c", 3, ["q"], ["h0"], {"matches": True, "strength": 3, "evidence": [0, 5, -1, "x"], "reason": "r"})
     assert v.evidence == ["h0"]
+
+
+# ── LLM layer (parser + async orchestrator, no Ollama needed) ────────────────────
+def test_parse_llm_response_extracts_json():
+    obj = _parse_llm_response('noise {"matches": true, "strength": 4, "evidence": [0]} tail')
+    assert obj["matches"] is True and obj["strength"] == 4
+
+
+def test_parse_llm_response_rejects_junk():
+    assert _parse_llm_response("no json here") is None
+    assert _parse_llm_response('{"strength": 3}') is None   # missing "matches"
+    assert _parse_llm_response("") is None
+
+
+def test_evaluate_falls_back_when_llm_returns_none():
+    async def fake_llm(criterion, items):
+        return None
+    items = [_it("XYZ Announces Positive Phase 2 Data", "GlobeNewswire")]
+    v = asyncio.run(evaluate_nl_target("turnaround", items, ticker="XYZ", name="XYZ Bio",
+                                       llm_fn=fake_llm, cache={}))
+    assert v.source == "regex_fallback" and v.matches is True
+
+
+def test_evaluate_no_signal_skips_llm_when_no_relevant_news():
+    async def fake_llm(criterion, items):
+        raise AssertionError("LLM must not be called when there are no survivors")
+    v = asyncio.run(evaluate_nl_target("turnaround", [_it("Generic market wrap")],
+                                       ticker="XYZ", name="XYZ Bio", llm_fn=fake_llm, cache={}))
+    assert v.source == "no_signal" and v.matches is False
+
+
+def test_evaluate_uses_llm_and_caches_success():
+    calls = {"n": 0}
+
+    async def fake_llm(criterion, items):
+        calls["n"] += 1
+        return {"matches": True, "strength": 5, "evidence": [0], "reason": "stark"}
+
+    items = [_it("XYZ Announces Positive Phase 2 Data", "GlobeNewswire")]
+    cache: dict = {}
+    v1 = asyncio.run(evaluate_nl_target("turnaround", items, ticker="XYZ", name="XYZ Bio",
+                                        llm_fn=fake_llm, cache=cache))
+    v2 = asyncio.run(evaluate_nl_target("turnaround", items, ticker="XYZ", name="XYZ Bio",
+                                        llm_fn=fake_llm, cache=cache))
+    assert v1.matches is True and 3 <= v1.strength <= 5
+    assert v1.evidence == ["XYZ Announces Positive Phase 2 Data"]
+    assert calls["n"] == 1 and v2 is v1   # second call served from cache
