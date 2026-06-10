@@ -103,3 +103,20 @@ def test_shrinking_revenue_fails_base_filter():
 
 def test_positive_revenue_passes_base_filter():
     assert passes_base_filter(_stock(), SimpleNamespace(market_cap=2e9, revenue_growth=0.15))
+
+
+# ── Decision trace (Phase 3) ────────────────────────────────────────────────────
+def test_trace_records_gate_and_stage_steps():
+    news = [_news("XYZ Announces Positive Phase 2 Data", source="GlobeNewswire")]
+    ins = [InsiderBuy("CEO", date(2026, 6, 4), date(2026, 6, 5), 2000, 100)]
+    s = score_alt_b(_fund(2e9, 0.10), _prices(OVERSOLD), news, ins, ticker="XYZ", name="XYZ Bio")
+    steps = {st.step: st for st in s.trace}
+    assert "Turnaround-Katalysator" in steps and "gate" in steps
+    assert steps["gate"].status == "ok"
+    assert steps["gate"].data["qualifies"] is True
+
+
+def test_trace_gate_skip_when_not_qualified():
+    s = score_alt_b(_fund(2e9, 0.10), _prices(OVERSOLD), [], [], ticker="ABC", name="ABC Bio")
+    gate = next(st for st in s.trace if st.step == "gate")
+    assert gate.status == "skip" and gate.data["qualifies"] is False

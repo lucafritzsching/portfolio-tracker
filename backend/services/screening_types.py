@@ -63,6 +63,7 @@ class StrategyScore:
     qualifies: bool = False
     agent_analysis: AgentAnalysis | None = None
     biotech_events: list[str] = field(default_factory=list)
+    trace: list = field(default_factory=list)  # list[trace.TraceStep] — structured decision trace
 
 
 def _to_float(value: Any) -> float | None:

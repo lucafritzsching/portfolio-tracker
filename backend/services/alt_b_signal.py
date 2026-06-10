@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import Any
 
 from services.event_strength import classify_event, is_relevant, setup_signal
+from services.trace import Trace
 from services.screening_types import (
     CONTEXT_DAYS,
     MIN_INSIDER_VALUE,
@@ -327,6 +328,25 @@ def score_alt_b(
     if biotech_events:
         decision_log.append(f"Biotech-Signaltypen erkannt: {', '.join(biotech_events)}.")
     decision_log.append(f"Gesamtergebnis: {score}/100 Punkte, Einstufung: {label}.")
+
+    # Structured decision trace — one step per scoring stage + the gate (see services/trace.py).
+    tr = Trace()
+    for b in score_breakdown:
+        tr.add(b.label, status="ok" if b.passed else "skip", reason=b.detail,
+               points=b.points, max_points=b.max_points)
+    if qualifies:
+        gate_reason = "Gate erfüllt: Schwäche-Setup UND Katalysator >= 3, Sektor nicht im Abwärtstrend."
+    elif gate_signal and sector_downtrend:
+        gate_reason = "Gate blockiert: Biotech-Sektor (XBI) im Abwärtstrend."
+    elif best is not None and not setup.is_setup:
+        gate_reason = "Gate nicht erfüllt: Katalysator vorhanden, aber kein Schwäche-Setup."
+    elif setup.is_setup and best is None:
+        gate_reason = "Gate nicht erfüllt: Schwäche-Setup, aber kein starker Katalysator (>= 3)."
+    else:
+        gate_reason = "Gate nicht erfüllt: weder Schwäche-Setup noch starker Katalysator."
+    tr.add("gate", status="ok" if qualifies else "skip", reason=gate_reason,
+           qualifies=qualifies, score=score, label=label)
+
     return StrategyScore(
         strategy="ALT_B",
         score=score,
@@ -340,6 +360,7 @@ def score_alt_b(
         qualifies=qualifies,
         agent_analysis=agent_analysis,
         biotech_events=biotech_events,
+        trace=tr.steps,
     )
 
 
