@@ -2,7 +2,9 @@
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
-from services.screener import InsiderBuy, ScreenerStock, passes_base_filter, score_alt_b
+from services.alt_b_signal import score_alt_b
+from services.screening_types import InsiderBuy
+from services.screener import ScreenerStock, passes_base_filter
 
 TODAY = date(2026, 6, 9)
 
