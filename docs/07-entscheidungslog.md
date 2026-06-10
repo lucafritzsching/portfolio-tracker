@@ -126,6 +126,30 @@ damit wird „GenAI" ehrlich.
 SEC-8-K-Ereignis-Rückgrat, LLM-Stärke-Klassifikation und ein Backtest als Wirksamkeitsnachweis.
 Strategie-Code nur auf `feature/alt-b`.
 
+## ADR-14 – Alt-B Schicht 2: volles Universum, SEC-8-K-Rückgrat, LLM-Typ + Button-Scan mit Cache
+**Kontext:** Schicht 1 fand kaum Treffer (statisches 10-Ticker-Universum, harte Umsatz-Pflicht) und
+erkannte „Turnaround-Stories" nur per Regex auf einzelne, lückenhafte News-Headlines.
+**Entscheidung:**
+- **Dynamisches Universum:** Finnhub-Crawl (NASDAQ → Biotech → ≤ 15 Mrd., ~250 Ticker) in
+  `screener_universe` gecacht; Refresh manuell per Button (~50 min Free-Tier). Ohne Crawl Fallback
+  auf die kuratierte JSON — die App bleibt sofort benutzbar.
+- **EDGAR-Vorprüfung statt Finnhub-Breitenscan:** EIN `submissions`-Call je Ticker liefert 8-K
+  (Katalysator-Items 1.01/7.01/8.01) **und** Form 4 im 7-Tage-Fenster. Rate-limitierte
+  Finnhub-Calls (News/Insider) nur noch für diese Treffer → Scan in Minuten statt Stunden.
+- **LLM bestimmt Typ, Code setzt Skala** (löst das ADR-13-Versprechen ein): qwen3:14b klassifiziert
+  8-K-Pressetexte + relevante News auf einen Typ aus `EVENT_RUBRIC` plus deutsche Story; Stärke 0–5
+  kommt deterministisch aus der Rubrik. Guardrails: Typ muss in der Rubrik liegen, Beleg-Zitat muss
+  wörtlich im Quelltext stehen, jeder Fehler → Regex-Fallback (`event_llm.py`, unit-getestet).
+- **Button-Scan + SSE + DB-Cache:** `GET /screener/alt-b/scan` streamt Fortschritt, Ergebnis liegt
+  als JSON-Snapshot in `screener_runs`; `GET /alt-b/latest` lädt ihn sofort. Kein Live-GET mehr.
+- **Pre-Revenue-Fallback wiederhergestellt** (war zwischenzeitlich auf `> 0` verschärft): kein
+  Umsatz = zulässig ohne Bonuspunkte, nur schrumpfender Umsatz fällt raus.
+**Begründung:** Mehr ehrliche Treffer durch Breite (Universum, Pre-Revenue) statt durch laschere
+Kriterien; 8-K ist lückenlos und point-in-time; das LLM liefert die Story, halluziniert aber keine
+Stärke und keine Belege.
+**Konsequenz / Trade-off:** Scan dauert Minuten (bewusst: Button + Fortschritt statt Latenz-Lüge);
+Universum-Crawl bleibt manuell. Offen (Schicht 3): Backtest-Integration als Wirksamkeitsnachweis.
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)

@@ -1,23 +1,43 @@
-"""Deterministic screener strategies for NASDAQ biotech candidates.
+"""Alt-B-Screener: NASDAQ-Biotech-Turnarounds (Schicht 2).
 
-The screener searches a small curated universe first. That keeps demos stable and
-avoids turning the app into a rate-limit-heavy full-market crawler.
+Gestufter Scan über das gecachte Universum (Button + SSE + DB-Cache statt Live-GET):
+billige Filter zuerst (Fundamentals, EDGAR-Vorprüfung mit einem submissions-Call),
+teure Schritte (Finnhub-News/-Insider, 8-K-Pressetexte, LLM) nur für die Treffer.
+Ohne gecachtes Universum liefert der Scan ein leeres Ergebnis; Aufbau per Refresh-Button.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 import httpx
 
-from services.event_strength import classify_event, is_relevant, sector_regime, setup_signal
+from services.event_llm import LLMEvent, classify_event_llm
+from services.event_strength import EventClassification, classify_event, is_relevant
+from services.sec_filings import (
+    Filing8K,
+    fetch_8k_catalysts,
+    fetch_cik_map,
+    fetch_recent_signals,
+)
+from services.screener_research import (
+    ResearchBrief,
+    aggregate_insider_context,
+    build_event_timeline,
+    build_research_brief,
+    detect_risk_signals,
+    detect_upcoming_catalysts,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from schemas import ScreenerCandidateOut, ScreenerResponseOut
 
 MAX_MARKET_CAP = 15_000_000_000
 TURNAROUND_DAYS = 7
@@ -143,6 +163,12 @@ class StrategyScore:
     qualifies: bool = False
     agent_analysis: AgentAnalysis | None = None
     biotech_events: list[str] = field(default_factory=list)
+    story_de: str = ""
+    evidence_quote: str = ""
+    used_llm: bool = False
+    event_type: str = ""
+    event_strength: int = 0
+    event_evidence: str = ""
 
 
 @dataclass
@@ -161,28 +187,8 @@ class ScreenerCandidate:
     insider_context_buys: list[InsiderBuy] = field(default_factory=list)
     biotech_events: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class ScreenerFunnelStep:
-    label: str
-    count: int
-    detail: str
-
-
-@dataclass(frozen=True)
-class ScreenerWindows:
-    event_days: int = TURNAROUND_DAYS
-    context_days: int = CONTEXT_DAYS
-    insider_context_days: int = INSIDER_CONTEXT_DAYS
-
-
-@dataclass
-class ScreenerRun:
-    universe_count: int
-    filter_funnel: list[ScreenerFunnelStep]
-    windows: ScreenerWindows
-    candidates: list[ScreenerCandidate]
+    sec_filings: list[Filing8K] = field(default_factory=list)
+    research: ResearchBrief = field(default_factory=ResearchBrief)
 
 
 def load_biotech_universe() -> list[ScreenerStock]:
@@ -207,9 +213,7 @@ def passes_base_filter(
     market_cap = _to_float(getattr(fundamentals, "market_cap", None))
     revenue_growth = _to_float(getattr(fundamentals, "revenue_growth", None))
     industry = stock.industry.lower()
-    # Pre-Revenue-Fallback: viele echte Biotechs haben (noch) keinen Umsatz
-    # (revenue_growth == None). Die nicht ausschließen — nur klar schrumpfende
-    # Umsätze (<= 0) fallen raus.
+    # Pre-Revenue-Fallback (ADR-13): kein Umsatz = ok, nur schrumpfender Umsatz fällt raus.
     growth_ok = revenue_growth is None or revenue_growth > 0
     return (
         stock.exchange.upper() == "NASDAQ"
@@ -316,47 +320,56 @@ def score_alt_b(
     ticker: str = "",
     name: str = "",
     sector_downtrend: bool = False,
+    llm_event: LLMEvent | None = None,
+    sec_events: list[tuple[Filing8K, EventClassification]] | None = None,
 ) -> StrategyScore:
-    """Event-basierter Turnaround-Score mit Gate + Konfidenz-Stufen.
+    """Originale Alt-B-Strategie: Basisfilter plus Event- oder Insider-Signal.
 
-    Pflicht-Gate: Schwäche-Setup UND ein echter Katalysator (Stärke >= 3, positiv,
-    ticker-relevant), und der Biotech-Sektor darf nicht im Abwärtstrend sein.
-    Insider/Wachstum heben danach die Stufe. Schwache News (Stärke <= 2) und reines
-    Momentum (kein Setup) qualifizieren bewusst NICHT.
+    Der Score bewertet nur die Alt-B-Idee aus dem Projektplan:
+    starker Unternehmens-Katalysator der letzten 7 Tage (Stärke >= 3) ODER
+    qualifizierter Insider-Kauf. Ein Kurs-Setup ist bewusst kein Gate.
+
+    Katalysator-Quellen: regex-klassifizierte News, regex-klassifizierte 8-K-Pressetexte
+    (`sec_events`) und — wenn vorhanden — die LLM-Klassifikation (`llm_event`), deren
+    Stärke deterministisch aus der Rubrik kommt. Die stärkste qualifizierende gewinnt.
     """
     reasons: list[str] = []
     evidence: list[str] = []
     score_breakdown: list[ScoreBreakdown] = []
     decision_log: list[str] = []
     perf_90d = performance_pct(prices, CONTEXT_DAYS)
-    biotech_events = biotech_event_tags(news)
     qualified_buys = qualified_insider_buys(insider_buys)
     revenue_growth = _to_float(getattr(fundamentals, "revenue_growth", None))
     market_cap = _to_float(getattr(fundamentals, "market_cap", None))
 
-    # ── Schwäche-Setup (Teil des Gates) ──
-    closes = [
-        c for c in (
-            _to_float(getattr(p, "close", None))
-            for p in sorted(prices, key=lambda p: _as_date(getattr(p, "date")))
-        ) if c is not None
-    ]
-    setup = setup_signal(closes)
-
-    # ── Ereignis-Klassifikation: nur ticker-relevante, positive News ──
-    classified: list[tuple[str, Any]] = []
+    # ── Ereignis-Klassifikation: nur ticker-relevante, positive News zählen ──
+    classified: list[tuple[str, Any, Any]] = []
     for item in news:
         headline = str(getattr(item, "headline", "") or "")
         summary = str(getattr(item, "summary", "") or "")
         if not headline or not is_relevant(headline, summary, ticker, name):
             continue
         ev = classify_event(headline, summary, getattr(item, "source", None))
-        classified.append((headline, ev))
-    qualifying = [(h, ev) for h, ev in classified if ev.qualifies]
+        classified.append((headline, ev, item))
+    for filing, ev in sec_events or []:
+        label = f"8-K {filing.filing_date}: {filing.event_type}"
+        classified.append((label, ev, None))
+    if llm_event is not None and llm_event.used_llm:
+        label = llm_event.evidence_quote or llm_event.story_de or "LLM-Klassifikation"
+        classified.append((label, llm_event.classification, None))
+    qualifying = [(h, ev, item) for h, ev, item in classified if ev.qualifies]
     best = max(qualifying, key=lambda t: t[1].strength, default=None)
-    positives = [(h, ev) for h, ev in classified if ev.direction == "positive"]
-    best_any = max(positives, key=lambda t: t[1].strength, default=None)
-    news_hits = [h for h, _ in qualifying]
+    observed_events = [
+        (h, ev, item)
+        for h, ev, item in classified
+        if ev.direction != "negative" and ev.strength > 0
+    ]
+    best_any = max(observed_events, key=lambda t: t[1].strength, default=None)
+    news_hits = [h for h, _, _ in qualifying]
+    biotech_events = biotech_event_tags([item for _, _, item in qualifying if item is not None])
+    event_type = best[1].type if best else ""
+    event_strength = best[1].strength if best else 0
+    event_evidence = best[0] if best else ""
 
     agent_analysis = analyze_news_agent(
         news=news,
@@ -372,26 +385,26 @@ def score_alt_b(
     else:
         decision_log.append("Basisfilter bestanden: NASDAQ, Biotech, Market Cap <= $15 Mrd.")
 
-    # ── Katalysator-Stärke (bis 40 Punkte, nur bei Stärke >= 3) ──
-    event_points = round(best[1].strength / 5 * 40) if best else 0
+    # ── Katalysator-Stärke (bis 50 Punkte, nur bei Stärke >= 3) ──
+    event_points = {5: 50, 4: 40, 3: 30}.get(best[1].strength, 0) if best else 0
     if best:
-        h, ev = best
+        h, ev, _ = best
         reasons.append(f"Echter Turnaround-Katalysator (Stärke {ev.strength}/5): {ev.type}")
         evidence.extend(news_hits[:3])
         decision_log.append(f"Katalysator Stärke {ev.strength}/5 erkannt ({ev.type}): {h}")
         catalyst_detail = f"Stärke {ev.strength}/5 – {ev.type}: {h}"
     elif best_any:
-        h, ev = best_any
+        h, ev, _ = best_any
         cap = " (Quelle gedeckelt → Recap)" if ev.capped_by_source else ""
         decision_log.append(f"News erkannt, aber nur Stärke {ev.strength}/5{cap} → kein Turnaround-Signal: {h}")
         catalyst_detail = f"Nur Stärke {ev.strength}/5{cap} – zählt nicht (Schwelle: 3)."
     else:
-        decision_log.append("Kein relevanter positiver Katalysator in den letzten 7 Tagen.")
-        catalyst_detail = "Kein relevanter positiver Katalysator erkannt."
+        decision_log.append("Kein starkes Turnaround-Event in den letzten 7 Tagen erkannt.")
+        catalyst_detail = "Kein starkes Turnaround-Event erkannt."
     score_breakdown.append(ScoreBreakdown(
         label="Turnaround-Katalysator",
         points=event_points,
-        max_points=40,
+        max_points=50,
         passed=best is not None,
         detail=catalyst_detail,
     ))
@@ -412,50 +425,38 @@ def score_alt_b(
         passed=bool(qualified_buys), detail=insider_quality_detail(insider_buys),
     ))
 
-    # ── Umsatzwachstum (bis 20) ──
-    growth_points = 0
-    if revenue_growth is not None and revenue_growth > 0.05:
+    # ── Umsatzwachstum (Bonus, bis 20 — Pre-Revenue ist zulässig, gibt nur keine Punkte) ──
+    if revenue_growth is not None and revenue_growth > 0:
         growth_points = 20
-        reasons.append("Umsatzwachstum über 5%")
-        decision_log.append(f"Umsatzwachstum stark positiv: {revenue_growth * 100:.1f}% (> 5%).")
-    elif revenue_growth is not None and revenue_growth > 0:
-        growth_points = 10
+        reasons.append("Positives Umsatzwachstum im letzten Quartal")
         decision_log.append(f"Umsatzwachstum positiv: {revenue_growth * 100:.1f}% (> 0%).")
+    elif revenue_growth is None:
+        growth_points = 0
+        decision_log.append("Pre-Revenue: keine Umsatzdaten — zulässig, aber keine Bonuspunkte.")
     else:
+        growth_points = 0
         decision_log.append("Kein positives Umsatzwachstum im letzten Quartal erkannt.")
     score_breakdown.append(ScoreBreakdown(
         label="Umsatzwachstum", points=growth_points, max_points=20, passed=growth_points > 0,
         detail=(f"{revenue_growth * 100:.1f}% Umsatzwachstum." if revenue_growth is not None
-                else "Keine Umsatzwachstumsdaten verfügbar."),
+                else "Pre-Revenue: keine Umsatzdaten (zulässig)."),
     ))
 
-    # ── Schwäche-Setup (bis 10, Teil des Gates) ──
-    setup_points = 10 if setup.is_setup else 0
-    if setup.is_setup:
-        reasons.append("Turnaround-Setup: ausgebombt + überverkauft")
-    decision_log.append(setup.reason)
-    score_breakdown.append(ScoreBreakdown(
-        label="Turnaround-Setup", points=setup_points, max_points=10,
-        passed=setup.is_setup, detail=setup.reason,
-    ))
+    score = min(event_points + insider_points + growth_points, 100)
+    has_catalyst = best is not None
+    qualifies = has_catalyst or bool(qualified_buys)
+    if qualifies:
+        decision_log.append("Alt-B-Gate erfüllt: starkes 7-Tage-Event oder qualifizierter Insider-Kauf vorhanden.")
+    else:
+        decision_log.append("Alt-B-Gate nicht erfüllt: weder starkes 7-Tage-Event noch qualifizierter Insider-Kauf.")
 
-    score = min(event_points + insider_points + growth_points + setup_points, 100)
+    used_llm = llm_event is not None and llm_event.used_llm
+    if used_llm:
+        decision_log.append(f"LLM-Klassifikation aktiv: Typ \"{llm_event.classification.type}\" (Stärke aus Rubrik).")
+    elif llm_event is not None:
+        decision_log.append("LLM nicht verfügbar/verworfen — Regex-Klassifikation als Fallback.")
 
-    # ── Das Gate: echter Turnaround = Schwäche-Setup UND starker Katalysator,
-    #    und der Biotech-Sektor darf nicht im Abwärtstrend sein. ──
-    gate_signal = setup.is_setup and best is not None
-    qualifies = gate_signal and not sector_downtrend
-    if gate_signal and sector_downtrend:
-        decision_log.append("Sektor-Regime: Biotech-Index (XBI) im Abwärtstrend → kein Einstieg trotz Signal.")
-    elif not gate_signal:
-        if best is not None and not setup.is_setup:
-            decision_log.append("Gate NICHT erfüllt: starker Katalysator, aber kein Schwäche-Setup (nicht ausgebombt / schon gelaufen).")
-        elif setup.is_setup and best is None:
-            decision_log.append("Gate NICHT erfüllt: ausgebombt, aber kein starker Katalysator (Stärke >= 3).")
-        else:
-            decision_log.append("Gate NICHT erfüllt: weder Schwäche-Setup noch starker Katalysator.")
-
-    label = _alt_b_tier(qualifies, bool(qualified_buys), revenue_growth)
+    label = _alt_b_label(score, qualifies)
     if biotech_events:
         decision_log.append(f"Biotech-Signaltypen erkannt: {', '.join(biotech_events)}.")
     decision_log.append(f"Gesamtergebnis: {score}/100 Punkte, Einstufung: {label}.")
@@ -472,6 +473,12 @@ def score_alt_b(
         qualifies=qualifies,
         agent_analysis=agent_analysis,
         biotech_events=biotech_events,
+        story_de=llm_event.story_de if used_llm else "",
+        evidence_quote=llm_event.evidence_quote if used_llm else "",
+        used_llm=used_llm,
+        event_type=event_type,
+        event_strength=event_strength,
+        event_evidence=event_evidence,
     )
 
 
@@ -617,112 +624,263 @@ async def fetch_insider_buys(
     return buys[:10]
 
 
-async def screen_biotech_turnaround(
+# ── Schicht-2-Scan: Universum → billige Filter → EDGAR-Vorprüfung → Detail + LLM ──
+
+ProgressFn = Callable[[dict], Awaitable[None]]
+
+
+def build_event_material(
+    sec_events: list[tuple[Filing8K, EventClassification]],
+    news: list[Any],
+    ticker: str,
+    name: str,
+    max_headlines: int = 5,
+) -> str:
+    """Rohmaterial für die LLM-Klassifikation: 8-K-Pressetexte + relevante Headlines."""
+    parts: list[str] = []
+    for filing, _ in sec_events[:2]:
+        if filing.press_release:
+            parts.append(f"SEC 8-K vom {filing.filing_date}: {filing.press_release}")
+    count = 0
+    for item in news:
+        headline = str(getattr(item, "headline", "") or "")
+        summary = str(getattr(item, "summary", "") or "")
+        if not headline or not is_relevant(headline, summary, ticker, name):
+            continue
+        parts.append(f"News: {headline}. {summary}".strip())
+        count += 1
+        if count >= max_headlines:
+            break
+    return "\n\n".join(parts)
+
+
+async def run_alt_b_scan(
     db: "AsyncSession",
     limit: int = 12,
     min_score: int = 0,
-) -> ScreenerRun:
+    progress: ProgressFn | None = None,
+) -> ScreenerResponseOut:
+    """Gestufter Scan über das gecachte Universum; Ergebnis wird in screener_runs persistiert."""
+    from schemas import ScreenerFunnelStepOut, ScreenerResponseOut, ScreenerWindowsOut
     from services.market_data import (
         fetch_and_store_fundamentals,
         fetch_and_store_news,
         fetch_and_store_prices,
     )
+    from services.universe import load_universe
 
-    universe = load_biotech_universe()
+    async def emit(event: dict) -> None:
+        if progress is not None:
+            await progress(event)
 
-    # Sektor-Regime einmal pro Lauf: in einen Biotech-Abwärtstrend (XBI) kaufen
-    # wir keine Turnarounds (vermeidet die sektorweiten Verlustwochen).
-    sector_downtrend = False
-    try:
-        xbi = await fetch_and_store_prices("XBI", db, period="1y")
-        xbi_closes = [
-            c for c in (
-                _to_float(getattr(p, "close", None))
-                for p in sorted(xbi, key=lambda p: _as_date(getattr(p, "date")))
-            ) if c is not None
-        ]
-        sector_downtrend = sector_regime(xbi_closes) == "down"
-    except Exception:
-        sector_downtrend = False
+    uni_stocks, uni_updated = await load_universe(db)
+    if uni_stocks:
+        # (Stock, grober Market Cap aus dem NASDAQ-Screener — Feinprüfung später via Fundamentals)
+        entries = [(ScreenerStock(s.ticker, s.name, "NASDAQ", s.industry), s.market_cap) for s in uni_stocks]
+    else:
+        entries = []
+    universe_source = "live"
+
+    today = datetime.utcnow().date()
+    window_from = (today - timedelta(days=TURNAROUND_DAYS)).isoformat()
+    window_to = today.isoformat()
+
+    # Stufe 1: grober Cap-Vorfilter aus den Screener-Daten (unbekannter Cap bleibt drin,
+    # die verbindliche Prüfung macht später der Fundamentals-Recheck).
+    cap_pass = [(stock, cap) for stock, cap in entries if cap is None or cap <= MAX_MARKET_CAP]
 
     candidates: list[ScreenerCandidate] = []
-    nasdaq_biotech_count = 0
-    market_cap_count = 0
-    revenue_growth_count = 0
-    current_signal_count = 0
+    edgar_pass: list[tuple[ScreenerStock, int, bool]] = []
+    base_count = 0
+    signal_count = 0
     score_count = 0
 
-    for stock in universe:
-        is_nasdaq_biotech = (
-            stock.exchange.upper() == "NASDAQ"
-            and ("biotech" in stock.industry.lower() or "biotechnology" in stock.industry.lower())
-        )
-        if not is_nasdaq_biotech:
-            continue
-        nasdaq_biotech_count += 1
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Stufe 2: EDGAR-Vorprüfung — EIN submissions-Call je Ticker (8-K + Form 4 zugleich).
+        # Läuft VOR den Fundamentals: gratis und ohne Rate-Limit-Druck, dadurch braucht
+        # yfinance/Finnhub nur noch die wenigen Signal-Ticker.
+        cik_map = await fetch_cik_map(client) if cap_pass else {}
+        for i, (stock, _cap) in enumerate(cap_pass):
+            await emit({"stage": "EDGAR-Vorprüfung", "i": i + 1, "n": len(cap_pass), "ticker": stock.ticker})
+            cik = cik_map.get(stock.ticker)
+            if cik is None:
+                continue
+            has_8k, has_form4 = await fetch_recent_signals(client, stock.ticker, cik, window_from, window_to)
+            await asyncio.sleep(0.15)  # SEC erlaubt ~10 req/s — bewusst defensiv
+            if has_8k or has_form4:
+                edgar_pass.append((stock, cik, has_8k))
 
-        fundamentals = await fetch_and_store_fundamentals(stock.ticker, db)
-        if fundamentals is None:
-            continue
+        # Stufe 3+4: Fundamentals-Recheck + Detail (Finnhub/yfinance/8-K-Pressetexte) + LLM.
+        for i, (stock, cik, has_8k) in enumerate(edgar_pass):
+            await emit({"stage": "Detail + LLM", "i": i + 1, "n": len(edgar_pass), "ticker": stock.ticker})
+            fundamentals = await fetch_and_store_fundamentals(stock.ticker, db)
+            if fundamentals is None:
+                continue
+            market_cap = _to_float(getattr(fundamentals, "market_cap", None))
+            if market_cap is None or market_cap > MAX_MARKET_CAP:
+                continue
+            revenue_growth = _to_float(getattr(fundamentals, "revenue_growth", None))
+            if revenue_growth is not None and revenue_growth <= 0:
+                continue
+            base_count += 1
 
-        market_cap = _to_float(getattr(fundamentals, "market_cap", None))
-        revenue_growth = _to_float(getattr(fundamentals, "revenue_growth", None))
-        if market_cap is None or market_cap > MAX_MARKET_CAP:
-            continue
-        market_cap_count += 1
+            prices = await fetch_and_store_prices(stock.ticker, db, period="1y")
+            news = await fetch_and_store_news(stock.ticker, db, days=TURNAROUND_DAYS)
+            insider_buys = await fetch_insider_buys(stock.ticker, days=TURNAROUND_DAYS)
+            insider_context_buys = await fetch_insider_buys(stock.ticker, days=INSIDER_CONTEXT_DAYS)
+            sec_events = (
+                await fetch_8k_catalysts(client, stock.ticker, cik, window_from, window_to)
+                if has_8k else []
+            )
 
-        # Pre-Revenue-Fallback: kein Umsatz (None) ist ok; nur schrumpfender Umsatz (<= 0) fliegt raus.
-        if revenue_growth is not None and revenue_growth <= 0:
-            continue
-        revenue_growth_count += 1
+            material = build_event_material(sec_events, news, stock.ticker, stock.name)
+            llm_event = await classify_event_llm(material, stock.ticker, stock.name) if material else None
 
-        prices = await fetch_and_store_prices(stock.ticker, db, period="1y")
-        news = await fetch_and_store_news(stock.ticker, db, days=TURNAROUND_DAYS)
-        insider_buys = await fetch_insider_buys(stock.ticker, days=TURNAROUND_DAYS)
-        insider_context_buys = await fetch_insider_buys(stock.ticker, days=INSIDER_CONTEXT_DAYS)
+            alt_a = score_alt_a(prices)
+            alt_b = score_alt_b(
+                fundamentals, prices, news, insider_buys,
+                ticker=stock.ticker, name=stock.name,
+                llm_event=llm_event, sec_events=sec_events,
+            )
+            if not has_current_turnaround_signal(alt_b):
+                continue
+            signal_count += 1
+            if alt_b.score < min_score:
+                continue
+            score_count += 1
+            insider_context = aggregate_insider_context(insider_buys, insider_context_buys)
+            event_timeline = build_event_timeline(news, sec_events, stock.ticker, stock.name)
+            risk_signals = detect_risk_signals(news)
+            upcoming_catalysts = detect_upcoming_catalysts(news)
+            research = build_research_brief(
+                revenue_growth=revenue_growth,
+                insider_context=insider_context,
+                event_timeline=event_timeline,
+                risk_signals=risk_signals,
+                upcoming_catalysts=upcoming_catalysts,
+            )
 
-        alt_a = score_alt_a(prices)
-        alt_b = score_alt_b(fundamentals, prices, news, insider_buys, ticker=stock.ticker,
-                            name=stock.name, sector_downtrend=sector_downtrend)
-        if not has_current_turnaround_signal(alt_b):
-            continue
-        current_signal_count += 1
-        if alt_b.score < min_score:
-            continue
-        score_count += 1
-
-        candidates.append(ScreenerCandidate(
-            ticker=stock.ticker,
-            name=stock.name,
-            exchange=stock.exchange,
-            industry=stock.industry,
-            market_cap=market_cap,
-            revenue_growth=revenue_growth,
-            performance_90d=alt_b.performance_90d,
-            alt_a=alt_a,
-            alt_b=alt_b,
-            turnaround_news=alt_b.turnaround_news,
-            insider_buys=insider_buys,
-            insider_context_buys=insider_context_buys,
-            biotech_events=alt_b.biotech_events,
-            risk_flags=alt_b.agent_analysis.risks if alt_b.agent_analysis else [],
-        ))
+            candidates.append(ScreenerCandidate(
+                ticker=stock.ticker,
+                name=stock.name,
+                exchange=stock.exchange,
+                industry=stock.industry,
+                market_cap=_to_float(getattr(fundamentals, "market_cap", None)),
+                revenue_growth=_to_float(getattr(fundamentals, "revenue_growth", None)),
+                performance_90d=alt_b.performance_90d,
+                alt_a=alt_a,
+                alt_b=alt_b,
+                turnaround_news=alt_b.turnaround_news,
+                insider_buys=insider_buys,
+                insider_context_buys=insider_context_buys,
+                biotech_events=alt_b.biotech_events,
+                risk_flags=[signal.label for signal in risk_signals] or (alt_b.agent_analysis.risks if alt_b.agent_analysis else []),
+                sec_filings=[filing for filing, _ in sec_events],
+                research=research,
+            ))
 
     candidates.sort(key=lambda c: (c.alt_b.score, c.alt_a.score), reverse=True)
-    limited = candidates[:limit]
-    return ScreenerRun(
-        universe_count=len(universe),
-        filter_funnel=[
-            ScreenerFunnelStep("Universum", len(universe), "kuratiertes NASDAQ-Biotech-Startuniversum"),
-            ScreenerFunnelStep("NASDAQ Biotech", nasdaq_biotech_count, "Exchange und Sektor passen"),
-            ScreenerFunnelStep("Market Cap <= 15 Mrd.", market_cap_count, "Mid-Cap/Small-Cap-Grenze erfüllt"),
-            ScreenerFunnelStep("Umsatzwachstum > 0", revenue_growth_count, "operative Verbesserung im letzten Quartal"),
-            ScreenerFunnelStep("7-Tage-Signal", current_signal_count, "aktuelle News oder qualifizierter Insider-Kauf"),
-            ScreenerFunnelStep("Score-Filter", score_count, f"Score >= {min_score}, danach Limit {limit}"),
-        ],
-        windows=ScreenerWindows(),
-        candidates=limited,
+    universe_detail = (
+        f"gecrawltes NASDAQ-Biotech-Universum (Stand {uni_updated:%d.%m.%Y})"
+        if universe_source == "live" and uni_updated
+        else "kein gecachtes Universum — bitte Universum aktualisieren"
     )
+    response = ScreenerResponseOut(
+        universe_count=len(entries),
+        filter_funnel=[
+            ScreenerFunnelStepOut(label="Universum", count=len(entries), detail=universe_detail),
+            ScreenerFunnelStepOut(label="Market Cap <= 15 Mrd.", count=len(cap_pass),
+                                  detail="Screener-Vorfilter; verbindlicher Recheck via Fundamentals"),
+            ScreenerFunnelStepOut(label="EDGAR-Vorprüfung", count=len(edgar_pass),
+                                  detail="8-K-Katalysator oder Form 4 in den letzten 7 Tagen"),
+            ScreenerFunnelStepOut(label="Umsatz ok (inkl. Pre-Revenue)", count=base_count,
+                                  detail="Cap-Recheck bestanden; Wachstum > 0 oder Pre-Revenue"),
+            ScreenerFunnelStepOut(label="7-Tage-Signal", count=signal_count,
+                                  detail="starkes Event (Stärke >= 3) oder qualifizierter Insider-Kauf"),
+            ScreenerFunnelStepOut(label="Score-Filter", count=score_count,
+                                  detail=f"Score >= {min_score}, danach Limit {limit}"),
+        ],
+        windows=ScreenerWindowsOut(
+            event_days=TURNAROUND_DAYS,
+            context_days=CONTEXT_DAYS,
+            insider_context_days=INSIDER_CONTEXT_DAYS,
+        ),
+        candidates=[candidate_out(c) for c in candidates[:limit]],
+        created_at=datetime.utcnow(),
+        universe_source=universe_source,
+        universe_updated_at=uni_updated,
+    )
+    await save_run(db, response)
+    return response
+
+
+# ── Marshalling (Dataclasses → Pydantic) + Persistenz ───────────────────────────
+
+def candidate_out(candidate: ScreenerCandidate) -> "ScreenerCandidateOut":
+    from dataclasses import asdict
+
+    from schemas import (
+        ScreenerCandidateOut,
+        ScreenerFilingOut,
+        ScreenerInsiderBuyOut,
+        ScreenerResearchBriefOut,
+        ScreenerScoreOut,
+    )
+
+    def _buy(buy: InsiderBuy) -> ScreenerInsiderBuyOut:
+        return ScreenerInsiderBuyOut(
+            name=buy.name, transaction_date=buy.transaction_date, filing_date=buy.filing_date,
+            shares=buy.shares, price=buy.price, value=buy.value,
+        )
+
+    return ScreenerCandidateOut(
+        ticker=candidate.ticker,
+        name=candidate.name,
+        exchange=candidate.exchange,
+        industry=candidate.industry,
+        market_cap=candidate.market_cap,
+        revenue_growth=candidate.revenue_growth,
+        performance_90d=candidate.performance_90d,
+        alt_a=ScreenerScoreOut(**asdict(candidate.alt_a)),
+        alt_b=ScreenerScoreOut(**asdict(candidate.alt_b)),
+        turnaround_news=candidate.turnaround_news,
+        insider_buys=[_buy(b) for b in candidate.insider_buys],
+        insider_context_buys=[_buy(b) for b in candidate.insider_context_buys],
+        biotech_events=candidate.biotech_events,
+        risk_flags=candidate.risk_flags,
+        sec_filings=[
+            ScreenerFilingOut(filing_date=f.filing_date, event_type=f.event_type, url=f.url)
+            for f in candidate.sec_filings
+        ],
+        research=ScreenerResearchBriefOut(**asdict(candidate.research)),
+    )
+
+
+async def save_run(db: "AsyncSession", response: ScreenerResponseOut) -> None:
+    from models import ScreenerRun as ScreenerRunModel
+
+    db.add(ScreenerRunModel(
+        status="completed",
+        universe_count=response.universe_count,
+        payload=response.model_dump(mode="json"),
+    ))
+    await db.commit()
+
+
+async def load_latest_run(db: "AsyncSession") -> "ScreenerResponseOut | None":
+    from sqlalchemy import select
+
+    from models import ScreenerRun as ScreenerRunModel
+    from schemas import ScreenerResponseOut
+
+    row = (
+        await db.execute(
+            select(ScreenerRunModel).order_by(ScreenerRunModel.created_at.desc()).limit(1)
+        )
+    ).scalars().first()
+    if row is None:
+        return None
+    return ScreenerResponseOut.model_validate(row.payload)
 
 
 def _to_float(value: Any) -> float | None:
@@ -770,21 +928,11 @@ def _alt_a_label(score: int) -> str:
     return "Technisch schwach"
 
 
-def _alt_b_label(score: int) -> str:
-    if score >= 75:
+def _alt_b_label(score: int, qualifies: bool) -> str:
+    if not qualifies:
+        return "Kein Alt-B-Signal"
+    if score >= 80:
         return "Starker Turnaround-Kandidat"
     if score >= 50:
         return "Watchlist Turnaround"
-    return "Noch kein Turnaround-Signal"
-
-
-def _alt_b_tier(qualifies: bool, has_insider: bool, revenue_growth: float | None) -> str:
-    """Ehrliche Einstufung: erst durchs Gate, dann Konfidenz-Stufe je nach Bestätigung."""
-    if not qualifies:
-        return "Kein Alt-B-Signal"
-    strong_growth = revenue_growth is not None and revenue_growth > 0.05
-    if has_insider and strong_growth:
-        return "Top-Treffer"
-    if has_insider:
-        return "Hohe Konviktion"
     return "Watchlist Turnaround"

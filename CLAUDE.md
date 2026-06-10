@@ -40,37 +40,39 @@ decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/
 Full-stack local webapp. The old `index.html` prototype is kept as reference only.
 
 ```
-frontend/    Vue 3 + TypeScript + Vite   → localhost:5173
-backend/     Python FastAPI              → localhost:8000
+frontend/    Vue 3 + TypeScript + Vite   → localhost:5173 (local, npm run dev)
+backend/     Python FastAPI (Docker)     → localhost:8000 (container portfaio-backend)
              PostgreSQL (Docker)         → localhost:5432
-             Ollama (Docker)             → localhost:11434
+             Ollama (NATIVE on host)     → localhost:11434
 ```
 
 ## Starting the App
 
-### 1. Start backend services (PostgreSQL + Ollama)
+### 1. Start PostgreSQL + backend (Docker)
 ```bash
+cp backend/.env.example backend/.env   # once; add FINNHUB_API_KEY
 docker-compose up -d
 ```
-
-### 2. Pull the AI model (first time only)
+The backend runs in the `portfaio-backend` container (Python 3.12, `uvicorn --reload`,
+`./backend` mounted to `/app` → code changes hot-reload). Logs:
 ```bash
-docker exec portfaio-ollama ollama pull qwen3:14b
+docker logs -f portfaio-backend
+```
+Compose overrides `DATABASE_URL` (host `postgres`) and `OLLAMA_BASE_URL`
+(`host.docker.internal`) for the container; the rest comes from `backend/.env`.
+
+### 2. Ollama (native on host, first time only)
+Ollama runs **natively**, not in Docker (a macOS container would be CPU-only; native uses
+the Metal GPU — see comments in `docker-compose.yml`). The backend container reaches it
+via `host.docker.internal`.
+```bash
+ollama pull qwen3:14b
 # or via the UI: KI-Analyse → "Modell laden"
 ```
 Default model is `qwen3:14b` (see `backend/config.py`; needs ~9 GB on 16 GB Apple Silicon).
 Fallback for low-RAM machines: set `OLLAMA_MODEL=qwen2.5:7b` in `backend/.env`.
 
-### 3. Start FastAPI backend
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate  # once
-pip install -r requirements.txt                      # once
-cp .env.example .env                                 # add FINNHUB_API_KEY
-uvicorn main:app --reload
-```
-
-### 4. Start Vue frontend
+### 3. Start Vue frontend
 ```bash
 cd frontend
 npm install   # once
@@ -78,6 +80,14 @@ npm run dev
 ```
 
 Open http://localhost:5173
+
+### Tests & gotchas
+- `backend/.venv` is **Python 3.9** and is only for `pytest tests/` — it cannot load the
+  app itself (PEP-604 `X | Y` annotations in `models.py` need 3.10+). Run the app via Docker.
+- `init_db()` only does `create_all` — it never alters existing tables. After a schema
+  change, drop the affected table in the Postgres container
+  (`docker exec -it portfaio-postgres psql -U portfaio -d portfaio -c 'DROP TABLE …;'`);
+  the backend recreates it on restart.
 
 ## Backend Structure
 
