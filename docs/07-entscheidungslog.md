@@ -126,6 +126,31 @@ damit wird „GenAI" ehrlich.
 SEC-8-K-Ereignis-Rückgrat, LLM-Stärke-Klassifikation und ein Backtest als Wirksamkeitsnachweis.
 Strategie-Code nur auf `feature/alt-b`.
 
+## ADR-14 – Alt-B Schicht 2–4: hybrider NL-Ziel-Klassifikator + Trace + eigene UI-Sektion
+**Kontext:** ADR-13 ließ bewusst offen, dass ein LLM später Bedeutung/Typ klassifizieren soll. Zudem
+stellte sich heraus: Forschungsgegenstand ist **nicht das Biotech-Screening**, sondern **wie gut ein
+lokales LLM Freitext in gute Outputs übersetzt** – der hartcodierte Biotech-Screener war nur eine
+Engpass-Vermeidung (und ist nicht einmal in `main.py` gemountet).
+**Entscheidung:**
+- **Konfigurierbares NL-Ziel** (`services/nl_target.py`): ein Freitext-*Kriterium* (NICHT auf „Turnaround"
+  hartcodiert) wird gegen die News einer Aktie beurteilt. Pipeline: günstiger Regex-Prefilter
+  (`event_strength`: Relevanz + Negation + Materialität) → **ein** gebündelter LLM-Aufruf → Urteil.
+- **Anti-Halluzination:** LLM-Stärke wird auf **Regex-Basis ±1** geklammert (das LLM darf nuancieren, aber
+  keinen Katalysator erfinden, den der Prefilter ablehnt); Belege müssen reale Schlagzeilen-Indizes sein;
+  bei LLM-Ausfall **deterministischer Regex-Fallback** (kein Regress).
+- **Zwei Modi:** `fast` (1 Aufruf) vs. `agentic` (kleiner, entkoppelter Tool-Loop mit `inspect_headline`,
+  das die deterministische Klassifikation pro Schlagzeile offenlegt) – für den Achse-B-Vergleich.
+- **Decision-Trace** (`services/trace.py`) macht jeden Schritt nachvollziehbar (`duration_ms` lokalisiert
+  später den Compute-Engpass). **Eigene UI-Sektion „Alt B"** (`views/AltBView.vue` + `GET /api/agent/nl-target`),
+  getrennt vom KI-Chat-Bereich (Team Alt-A) – gespiegelt, plus Alt-B-Extras (Trace, fast/agentic).
+**Begründung:** Determinismus bleibt das Rückgrat (Gate/Stärke-Skala in Code); das LLM liefert NL-Urteil +
+Begründung, bounded gegen Halluzination – analog zum Evidence-/Faithfulness-Ansatz (ADR-11). „GenAI" wird
+ehrlich messbar: Regex-Basis vs. LLM-Rohstärke stehen im Trace.
+**Konsequenz / Trade-off:** `nl_target` ist entkoppelt (nur `event_strength` + `config` + `httpx`) und
+bewusst NICHT in `score_alt_b` verdrahtet (Freitext→Output ist das Ziel, nicht der Sektor-Scan). Offen:
+Reddit/weitere NL-Quellen hinter `NLItem`, Multi-Agent-Orchestrierung, ein Backtest. Details:
+[10-experiment-alt-b.md](10-experiment-alt-b.md).
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)
