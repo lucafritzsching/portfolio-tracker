@@ -94,6 +94,12 @@ export const api = {
       return new EventSource(`${BASE}/agent/chat?question=${encodeURIComponent(question)}&current_prices=${p}`)
     },
 
+    nlTarget: (criterion: string, ticker: string, mode: 'fast' | 'agentic'): EventSource =>
+      new EventSource(
+        `${BASE}/agent/nl-target?ticker=${encodeURIComponent(ticker)}` +
+        `&criterion=${encodeURIComponent(criterion)}&mode=${mode}`,
+      ),
+
     newsSummary: (ticker: string): EventSource =>
       new EventSource(`${BASE}/agent/news-summary/${ticker}`),
 

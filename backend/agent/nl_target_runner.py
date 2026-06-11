@@ -31,8 +31,8 @@ def _render_verdict(criterion: str, verdict: NLVerdict, n_items: int) -> str:
     if verdict.reason:
         lines.append(f"- **Begründung:** {verdict.reason}")
     if verdict.evidence:
-        lines.append("- **Beleg-Schlagzeilen:**")
-        lines.extend(f"  - {h}" for h in verdict.evidence)
+        lines.append(f"- **Belege ({len(verdict.evidence)}):**")
+        lines.extend(f"- {h}" for h in verdict.evidence)
 
     src = {
         "llm": "LLM-Urteil",

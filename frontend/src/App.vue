@@ -11,6 +11,7 @@ import SavingsView from '@/views/SavingsView.vue'
 import NewsView from '@/views/NewsView.vue'
 import AnalysisView from '@/views/AnalysisView.vue'
 import ChatView from '@/views/ChatView.vue'
+import AltBView from '@/views/AltBView.vue'
 import EvalView from '@/views/EvalView.vue'
 
 const portfolio = usePortfolioStore()
@@ -35,6 +36,7 @@ onMounted(async () => {
       <NewsView v-else-if="ui.activeView === 'news'" />
       <AnalysisView v-else-if="ui.activeView === 'analysis'" />
       <ChatView v-else-if="ui.activeView === 'chat'" />
+      <AltBView v-else-if="ui.activeView === 'altb'" />
       <EvalView v-else-if="ui.activeView === 'eval'" />
     </main>
 
