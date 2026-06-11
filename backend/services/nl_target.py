@@ -46,6 +46,7 @@ class NLVerdict:
     source: str = "llm"        # llm | regex_fallback | no_signal
     regex_strength: int = 0    # deterministic baseline (for the Phase-6 hallucination metric)
     llm_strength: int | None = None  # raw LLM strength before clamp (None if no LLM ran)
+    mode: str = "fast"         # fast | agentic — which evaluation path produced this verdict
 
 
 def prefilter(items: list[NLItem], ticker: str = "", name: str = "") -> tuple[list[NLItem], int, list[str]]:
@@ -177,9 +178,121 @@ async def _call_ollama(criterion: str, items: list[NLItem]) -> dict | None:
     return _parse_llm_response(text)
 
 
-def _cache_key(criterion: str, items: list[NLItem]) -> str:
-    blob = criterion + "::" + "|".join(it.text for it in items)
+def _cache_key(criterion: str, items: list[NLItem], mode: str = "fast") -> str:
+    blob = f"{mode}::{criterion}::" + "|".join(it.text for it in items)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+# ── Agentic mode (Schicht 4: the LLM "works through it" via a self-contained tool-loop) ──
+#
+# Deliberately self-contained — a small Ollama tool-loop living here, NOT the orchestrator's
+# _run_agent_loop (which is SSE-streaming, DB-bound and returns free text). The single tool
+# exposes the deterministic event classification per headline, so the agent can consult the
+# regex signal while reasoning. The loop's final output is the same verdict JSON the fast path
+# produces, so combine_verdict applies the identical clamp + regex fallback.
+
+_AGENTIC_MAX_ITERS = 3
+
+_NL_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "inspect_headline",
+        "description": ("Liefert Volltext, Quelle und die deterministische Ereignis-Klassifikation "
+                        "(Stärke 0-5, Richtung, Typ, Quellen-Deckelung) einer Schlagzeile per Index."),
+        "parameters": {
+            "type": "object",
+            "properties": {"index": {"type": "integer", "description": "0-basierter Index der Schlagzeile"}},
+            "required": ["index"],
+        },
+    },
+}]
+
+
+def _format_agentic_prompt(criterion: str, items: list[NLItem]) -> str:
+    numbered = "\n".join(f"{i}. {it.text}" for i, it in enumerate(items))
+    return (
+        "Beurteile, ob eine Aktie aktuell das folgende Kriterium erfüllt — AUSSCHLIESSLICH auf Basis "
+        f"dieser Schlagzeilen.\n\nKriterium: „{criterion}“\n\nSchlagzeilen:\n{numbered}\n\n"
+        "Du KANNST das Tool inspect_headline(index) aufrufen, um Volltext, Quelle und die deterministische "
+        "Ereignis-Klassifikation einer Schlagzeile zu prüfen (nutze es für starke/verdächtige Schlagzeilen). "
+        "Wenn du genug weißt, antworte AUSSCHLIESSLICH mit JSON, ohne weiteren Text:\n"
+        '{"matches": true|false, "strength": 1-5, "evidence": [Indizes], "reason": "kurze Begründung"}\n'
+        "Erfinde nichts; stützen die Schlagzeilen das Kriterium nicht, dann matches=false."
+    )
+
+
+def _inspect_headline(index, survivors: list[NLItem]) -> str:
+    """Tool body: full text/source + deterministic regex classification for headline `index`."""
+    try:
+        i = int(index)
+    except (TypeError, ValueError):
+        return "Ungültiger Index."
+    if not 0 <= i < len(survivors):
+        return f"Index {index} außerhalb des Bereichs (0..{len(survivors) - 1})."
+    it = survivors[i]
+    ev = classify_event(it.text, "", it.source)
+    return json.dumps({
+        "index": i, "text": it.text, "source": it.source,
+        "regex_strength": ev.strength, "direction": ev.direction, "type": ev.type,
+        "capped_by_source": ev.capped_by_source, "qualifies": ev.qualifies,
+    }, ensure_ascii=False)
+
+
+async def _chat_once(messages: list[dict], tools: list[dict]) -> dict:
+    """One Ollama /api/chat turn (temperature 0); returns the raw message dict. Raises on HTTP error."""
+    payload = {
+        "model": settings.ollama_model,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "tools": tools,
+        "options": {"temperature": 0},
+    }
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
+        resp.raise_for_status()
+        return resp.json().get("message", {}) or {}
+
+
+async def _run_nl_tool_loop(criterion: str, survivors: list[NLItem], *, chat_fn=None) -> dict | None:
+    """Multi-turn tool-loop: the LLM may inspect headlines, then emits the verdict JSON. None on failure."""
+    fn = chat_fn or _chat_once
+    messages = [{"role": "user", "content": _format_agentic_prompt(criterion, survivors)}]
+    for i in range(_AGENTIC_MAX_ITERS):
+        is_last = i == _AGENTIC_MAX_ITERS - 1
+        try:
+            message = await fn(messages, [] if is_last else _NL_TOOLS)
+        except Exception:
+            return None
+        message = message or {}
+        tool_calls = message.get("tool_calls") or []
+        content = message.get("content", "") or ""
+
+        if not tool_calls:
+            parsed = _parse_llm_response(content)
+            if parsed is not None:
+                return parsed
+            if is_last:
+                return None
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content": "Gib jetzt das finale Urteil als JSON aus."})
+            continue
+
+        messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+        for tc in tool_calls:
+            fn_def = tc.get("function", {})
+            args = fn_def.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            if fn_def.get("name") == "inspect_headline":
+                result = _inspect_headline(args.get("index"), survivors)
+            else:
+                result = f"Unbekanntes Tool: {fn_def.get('name')}"
+            messages.append({"role": "tool", "content": result})
+    return None
 
 
 async def evaluate_nl_target(
@@ -188,37 +301,45 @@ async def evaluate_nl_target(
     ticker: str = "",
     name: str = "",
     *,
+    mode: str = "fast",
     llm_fn=None,
+    chat_fn=None,
     cache: dict | None = None,
 ) -> NLVerdict:
-    """Full evaluation: prefilter → (cached) batched LLM judgment → bounded verdict.
+    """Full evaluation: prefilter → (cached) LLM judgment → bounded verdict.
 
-    Only relevant, non-negative headlines reach the LLM, and at most one batched call is made
-    per (criterion, headlines) — so this stays cheap on a MacBook. ``llm_fn`` is injectable for
-    tests; the default is the local Ollama call. Only successful LLM verdicts are cached, so a
-    transient outage never poisons the cache with a fallback.
+    ``mode="fast"`` makes one batched LLM call; ``mode="agentic"`` runs a self-contained tool-loop
+    where the LLM can inspect headlines before judging. Both paths funnel through combine_verdict, so
+    the regex clamp + fallback are identical. Only relevant, non-negative headlines reach the LLM, and
+    verdicts are cached per (mode, criterion, headlines) — so this stays cheap on a MacBook. ``llm_fn``
+    (fast) and ``chat_fn`` (agentic) are injectable for tests; defaults hit the local Ollama. Only
+    successful LLM verdicts are cached, so a transient outage never poisons the cache.
     """
     survivors, regex_strength, qualifying = prefilter(items, ticker, name)
     if not survivors:
         return NLVerdict(
             matches=False, strength=0,
             reason="Keine relevanten, nicht-negativen Schlagzeilen.",
-            evidence=[], source="no_signal", regex_strength=0, llm_strength=None,
+            evidence=[], source="no_signal", regex_strength=0, llm_strength=None, mode=mode,
         )
 
     cache = _VERDICT_CACHE if cache is None else cache
-    key = _cache_key(criterion, survivors)
+    key = _cache_key(criterion, survivors, mode)
     if key in cache:
         return cache[key]
 
-    fn = llm_fn or _call_ollama
-    try:
-        llm_result = await fn(criterion, survivors)
-    except Exception:
-        llm_result = None
+    if mode == "agentic":
+        llm_result = await _run_nl_tool_loop(criterion, survivors, chat_fn=chat_fn)
+    else:
+        fn = llm_fn or _call_ollama
+        try:
+            llm_result = await fn(criterion, survivors)
+        except Exception:
+            llm_result = None
 
     verdict = combine_verdict(criterion, regex_strength, qualifying,
                               [it.text for it in survivors], llm_result)
+    verdict.mode = mode
     if verdict.source == "llm":
         cache[key] = verdict
     return verdict

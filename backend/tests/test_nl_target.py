@@ -107,3 +107,36 @@ def test_evaluate_uses_llm_and_caches_success():
     assert v1.matches is True and 3 <= v1.strength <= 5
     assert v1.evidence == ["XYZ Announces Positive Phase 2 Data"]
     assert calls["n"] == 1 and v2 is v1   # second call served from cache
+
+
+# ── Agentic mode (self-contained tool-loop, no Ollama needed) ────────────────────
+def test_inspect_headline_exposes_regex_classification():
+    from services.nl_target import _inspect_headline
+    out = _inspect_headline(0, [_it("XYZ Announces Positive Phase 2 Data", "GlobeNewswire")])
+    assert "regex_strength" in out and "Phase 2" in out
+    assert _inspect_headline(9, []).startswith("Index")
+
+
+def test_agentic_mode_inspects_then_verdicts():
+    turns = {"n": 0}
+
+    async def fake_chat(messages, tools):
+        turns["n"] += 1
+        if turns["n"] == 1:
+            return {"content": "", "tool_calls": [{"function": {"name": "inspect_headline", "arguments": {"index": 0}}}]}
+        return {"content": '{"matches": true, "strength": 4, "evidence": [0], "reason": "stark"}', "tool_calls": []}
+
+    items = [_it("XYZ Announces Positive Phase 2 Data", "GlobeNewswire")]
+    v = asyncio.run(evaluate_nl_target("turnaround", items, ticker="XYZ", name="XYZ Bio",
+                                       mode="agentic", chat_fn=fake_chat, cache={}))
+    assert v.mode == "agentic" and v.matches is True and turns["n"] == 2 and 3 <= v.strength <= 5
+
+
+def test_agentic_mode_falls_back_when_no_verdict_json():
+    async def fake_chat(messages, tools):
+        return {"content": "denke noch nach …", "tool_calls": []}
+
+    items = [_it("XYZ Announces Positive Phase 2 Data", "GlobeNewswire")]
+    v = asyncio.run(evaluate_nl_target("turnaround", items, ticker="XYZ", name="XYZ Bio",
+                                       mode="agentic", chat_fn=fake_chat, cache={}))
+    assert v.source == "regex_fallback" and v.mode == "agentic"
