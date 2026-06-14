@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import PriceHistory, FundamentalsCache, NewsCache
+from services.number_utils import finite_number
 
 # Daily OHLCV bars: cache counts as fresh if the newest stored bar is within this
 # many calendar days (covers weekends/holidays without refetching every request).
@@ -121,14 +122,14 @@ async def fetch_and_store_fundamentals(
         return cached
 
     fields = dict(
-        pe_ratio=info.get("trailingPE"),
-        market_cap=info.get("marketCap"),
-        eps=info.get("trailingEps"),
-        revenue_growth=info.get("revenueGrowth"),
-        fifty_two_week_high=info.get("fiftyTwoWeekHigh"),
-        fifty_two_week_low=info.get("fiftyTwoWeekLow"),
-        dividend_yield=info.get("dividendYield"),
-        beta=info.get("beta"),
+        pe_ratio=finite_number(info.get("trailingPE")),
+        market_cap=finite_number(info.get("marketCap")),
+        eps=finite_number(info.get("trailingEps")),
+        revenue_growth=finite_number(info.get("revenueGrowth")),
+        fifty_two_week_high=finite_number(info.get("fiftyTwoWeekHigh")),
+        fifty_two_week_low=finite_number(info.get("fiftyTwoWeekLow")),
+        dividend_yield=finite_number(info.get("dividendYield")),
+        beta=finite_number(info.get("beta")),
         fetched_at=datetime.utcnow(),
     )
     if cached:

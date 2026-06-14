@@ -24,6 +24,27 @@ def test_routine_presentation_is_weak():
     assert ev.strength == 2 and not ev.qualifies
 
 
+def test_positive_phase2_event_is_not_downgraded_by_presentation_wording():
+    ev = classify_event(
+        "Biotech Announces Positive Phase 2 Data and Will Present Results at ASCO",
+        source="GlobeNewswire",
+    )
+    assert ev.type == "Positive Phase-2 Daten"
+    assert ev.strength == 4
+    assert ev.direction == "positive"
+    assert ev.qualifies
+
+
+def test_positive_phase2_comprehensive_data_beats_generic_presentation_rule():
+    ev = classify_event(
+        "Biotech Announces Positive Comprehensive Data from Phase 2 Trial in Rare Disease",
+        source="GlobeNewswire",
+    )
+    assert ev.type == "Positive Phase-2 Daten"
+    assert ev.strength == 4
+    assert ev.qualifies
+
+
 def test_failed_trial_is_negative_and_zero():
     ev = classify_event("Company Announces Phase 3 Trial Failed to Meet Primary Endpoint",
                         source="GlobeNewswire")
@@ -42,20 +63,37 @@ def test_partnership_is_strength_4():
     assert ev.strength == 4 and ev.qualifies
 
 
-def test_commentary_source_caps_strong_event():
-    # Gleicher starker Inhalt: PR-Wire = voll, Kommentar (Yahoo) = gedeckelt auf 2.
+def test_commentary_source_does_not_cap_concrete_clinical_event():
     pr = classify_event("Positive Phase 2 data reported", source="GlobeNewswire")
     media = classify_event("Positive Phase 2 data reported", source="Yahoo")
     assert pr.strength == 4 and not pr.capped_by_source
-    assert media.strength == 2 and media.capped_by_source and not media.qualifies
+    assert media.strength == 4 and not media.capped_by_source and media.qualifies
 
 
-def test_beam_recap_via_commentary_does_not_qualify():
+def test_milestone_payment_is_relevant_even_from_media_source():
     ev = classify_event(
-        "Beam Therapeutics Is Up 17.6% After Advancing BEAM-302 Toward Accelerated Approval",
+        "Atrium Therapeutics Earns $15 Million Milestone Payment from Bristol Myers Squibb Under Global Cardiovascular Collaboration",
         source="Yahoo",
     )
-    assert ev.capped_by_source and not ev.qualifies  # starker Katalysator, aber nur Recap
+    assert ev.type == "Meilensteinzahlung aus Kooperation"
+    assert ev.strength == 4
+    assert ev.direction == "positive"
+    assert ev.qualifies
+
+
+def test_analyst_opinion_stays_weak():
+    ev = classify_event("Analyst Upgrades Biotech and Raises Price Target", source="MarketWatch")
+    assert ev.type == "Analystenmeinung"
+    assert ev.strength == 2
+    assert not ev.qualifies
+
+
+def test_capital_raise_is_concrete_but_not_positive_turnaround_candidate():
+    ev = classify_event("Biotech Prices $75 Million Public Offering", source="GlobeNewswire")
+    assert ev.type == "Kapitalerhöhung"
+    assert ev.strength == 3
+    assert ev.direction == "neutral"
+    assert not ev.qualifies
 
 
 # ── Relevanz ────────────────────────────────────────────────────────────────────
