@@ -166,6 +166,7 @@ async def _call_ollama(criterion: str, items: list[NLItem]) -> dict | None:
         "model": settings.ollama_model,
         "messages": [{"role": "user", "content": _format_prompt(criterion, items)}],
         "stream": False,
+        "think": False,  # match the agentic path: disables qwen3 "thinking" → faster + less drift
         "options": {"temperature": 0},
     }
     try:
