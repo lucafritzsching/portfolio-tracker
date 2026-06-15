@@ -3,6 +3,11 @@
 > Beantwortet die Forschungsfrage *„deterministisch vs. (geführtes/pures) LLM — was liefert bessere
 > Ergebnisse?"* mit **gemessenen Zahlen**, nicht mit Bauchgefühl. Alle Zahlen sind reproduzierbar.
 > ⚠️ Genauigkeits-/Latenzzahlen stammen aus dem 36-Fälle-Lauf **vor dem `think:false`-Fix** (Re-Run offen).
+>
+> ⚠️ **Architektur-Update (ADR-17):** Achse B unten beschreibt den **alten, geklammerten** NL-Agenten
+> (regex-Basis ±1). Der NL-Judge ist inzwischen **sektor-agnostisch + beleggebunden** (kein Clamp/Rubrik) —
+> Anti-Halluzination = „nur echte Schlagzeilen zitierbar". Die Clamp-Zahlen bleiben als *historischer*
+> Determinismus-vs-LLM-Beleg gültig; die `think:false`-Befunde (Achse C) gelten unverändert.
 
 ## Drei Achsen
 

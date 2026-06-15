@@ -1,5 +1,11 @@
 # 3. Agent-Design (Kernstück)
 
+> **Refactor-Hinweis (ADR-16/17):** Der Agent ist inzwischen **ein Chat-Router** (`GET /api/agent/ask`),
+> der je Anfrage Werkzeuge wählt (Screen / NL-Urteil / Statistik); das NL-Urteil ist **sektor-agnostisch +
+> beleggebunden** (kein Biotech-Clamp mehr). Dieses Kapitel beschreibt das ursprüngliche Hybrid-Design
+> (als Konzept weiter gültig) — aktuelle Architektur: [refactor_flowcharts.md](refactor_flowcharts.md)
+> Flowchart 8, [07-entscheidungslog.md](07-entscheidungslog.md) ADR-16/17, [12-data-science-methodik.md](12-data-science-methodik.md).
+
 > Dies ist das wichtigste Dokument. Es beschreibt, wie der KI-Agent zu seiner Empfehlung kommt
 > und warum er so aufgebaut ist.
 

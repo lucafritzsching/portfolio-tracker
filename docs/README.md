@@ -24,6 +24,15 @@ Diese Dokumentation richtet sich an **Teammitglieder und KI-Agenten** und erklä
 | 9 | **[09-release-v2.0-baseline.md](09-release-v2.0-baseline.md)** | **Release v2.0-baseline: Evidence-Gate, Eval, Chat, Branching, Changelog** |
 | 10 | [10-experiment-alt-b.md](10-experiment-alt-b.md) | **Alt-B-Experiment**: NL-Ziel-Agent (Freitext→Output), 3 Achsen, fast/agentic, Halluzinations-Messung |
 | 11 | [11-projekt-journey.md](11-projekt-journey.md) | **Projekt-Journey**: Prozess, Team-Aufteilung, Cross-Team-Entscheidungen, Zeitleiste, Lessons |
+| 12 | [12-data-science-methodik.md](12-data-science-methodik.md) | **DS-Methodik**: ARIMA/RandomForest/Ensemble — Daten, Labels, Validierung, Grenzen (ehrlich) |
+
+> **Aktueller Stand (Refactor, ADR-16/17):** Die Agenten-Funktionen sind zu **einem Chat-Fenster**
+> zusammengeführt, das je nach Anfrage **routet** — Strategie-Screen, **sektor-agnostisches** News-/
+> Klarsprache-Urteil (beleggebunden, **kein** Biotech-Tuning mehr) oder statistische Modelle (ehrlich
+> ausgewiesen). Endpoint `GET /api/agent/ask`; Architektur in
+> [refactor_flowcharts.md](refactor_flowcharts.md) (Flowchart 8) + [12-data-science-methodik.md](12-data-science-methodik.md).
+> Frühere getrennte Oberflächen (KI-Analyse, Alt-B-Finder, Vergleich) sind entfernt; ältere Doku-Stellen,
+> die sie/den Clamp beschreiben, sind historischer Kontext.
 
 ## 30-Sekunden-Überblick
 

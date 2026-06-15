@@ -178,6 +178,43 @@ Alt-As Ensemble verdrahtet (das wäre Konsolidierung); `think:false` ist Default
 stammen von **vor** dem think-Fix → Re-Run offen. Der regex-Guard ist nicht gratis (unterdrückte 1 korrektes
 Urteil, da die `event_strength`-Rubrik biotech-getunt ist).
 
+## ADR-16 – Ein Chat-Router-Agent ersetzt die getrennten Agenten-Oberflächen
+**Kontext:** Drei zerfaserte Agenten-Oberflächen (KI-Analyse, Alt-B-Finder/NL, Vergleich); zwei liefen in
+Fehler **ohne Server-Log** (in den SSE-`[FEHLER]`-String geschluckt). Wunsch: drastisch einfacher.
+**Entscheidung:** **EIN Chat-Fenster.** `orchestrator.ask_stream` routet eine Freitext-Anfrage per **nativem
+Ollama-Tool-Calling** (`_run_agent_loop`, T=0, sichtbare 🔧-Trace) an Werkzeuge: `screen_by_strategy`
+(yfinance-Screen), `judge_news` (NL-Urteil), `run_statistical_model`/`calculate_technical_indicators`
+(ARIMA/RF/Technik) + Hintergrund-Tools. Endpoint `GET /api/agent/ask`. Frontend: `ChatView` = einzige
+Agenten-Oberfläche (mit Status/Warmup/Modell-Controls); `AnalysisView`/`AltBView`/`ComparisonView` +
+`finder_runner`/`nl_target_runner` + `/agent/finder`+`/agent/nl-target` **entfernt**. **Durchgehendes
+Logging** (Tool-Calls, Tracebacks via `logger.exception`, SSE-Fehler) statt stummem Schlucken.
+**Begründung:** Das Routing-Substrat existierte bereits; LLM-Tool-Calling genügt (kein separater
+Intent-Klassifikator); die Tools sind deterministisch/guarded → sicher. Der Vergleich „deterministisch vs.
+LLM" lebt nun **im Agenten** (Statistik-Tools vs. NL-Urteil) + in Flowchart 8/Doku — **keine** Konsolidierung
+zu einem Score.
+**Konsequenz / Trade-off:** Multi-Agent bleibt Ausblick. Das schwere Evidence-/Faithfulness-Gate der
+Alt-A-Analyse wird im Chat nicht angewandt; Erdung über Tool-Ergebnisse + Prompt-Disziplin + NL-Belegbindung
++ Logging.
+
+## ADR-17 – Generischer, beleggebundener NL-Judge + ehrliche, validierte DS-Modelle
+**Kontext:** (1) Der NL-Judge war **biotech-getunt** (`event_strength`-Rubrik + Regex-Clamp) → für
+Nicht-Biotech-Titel praktisch stumm. (2) Die DS-Modelle waren methodisch fragwürdig: ARIMA-„Konfidenz"
+`1−|AIC|/10000` (sinnlos), RandomForest sagte einen **~20 Tage alten** Bar vorher, **keine**
+Out-of-Sample-Validierung, **keine** Persistenz.
+**Entscheidung (NL):** `services/nl_target.py` neu — **Relevanz** (Ticker/Name) + **Subjekt-Fokus-Prompt** +
+**Belegbindung** (`build_verdict` statt `combine_verdict`): ein „Treffer" braucht ≥ 1 zitierte **echte**
+Schlagzeile; **kein** Clamp, **keine** Sektor-Rubrik. Vollständig sektor-agnostisch.
+**Entscheidung (DS):** ARIMA-Konfidenz aus dem **95 %-Prognoseintervall**; RandomForest sagt den
+**aktuellen** Bar vorher + weist **Out-of-Sample-Genauigkeit** (zeitgeordneter Holdout) aus + robuste
+Klassenwahrscheinlichkeiten. Befunde **ehrlich dokumentiert** ([12-data-science-methodik.md](12-data-science-methodik.md)):
+RF-OOS ≈ 51 %, Walk-Forward-Backtest **ohne verlässlichen Vorteil**, keine Persistenz (Refit pro Anfrage).
+**Begründung:** Es ist ein **Data-Science-Projekt** — Allgemeingültigkeit + methodische Ehrlichkeit zählen
+mehr als Feature-Zahl oder Schein-Genauigkeit. Anti-Halluzination jetzt über **Erdung** (das LLM kann keine
+erfundene Schlagzeile zitieren) statt einer sektorspezifischen Heuristik.
+**Konsequenz / Trade-off:** Der frühere „0 Halluzinationen via Clamp"-Beleg ist durch Belegbindung abgelöst;
+News-Feeds bleiben verrauscht (tangentiale Erwähnungen möglich, durch Relevanz + Fokus gemindert). Ausblick:
+`auto_arima`, RF mit `TimeSeriesSplit`-CV + persistiertem Modell, größeres Backtest-Universum.
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)

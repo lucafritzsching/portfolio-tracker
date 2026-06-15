@@ -48,7 +48,8 @@ Ticker werden serverseitig in Großbuchstaben normalisiert.
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| GET | `/analyze/{ticker}?current_prices=<json>&agentic=false` | **SSE-Stream** Einzelanalyse. Liefert: deterministischen Block → (optional Tool-Aufrufe bei `agentic=true`) → **Evidence-gegate** Begründung. Endet mit `data: [DONE]`. |
+| GET | `/ask?question=<text>&current_prices=<json>` | **★ Primär (Refactor):** **SSE-Stream** Router-Agent. Eine Freitext-Frage → das LLM wählt das Werkzeug (`screen_by_strategy` / `judge_news` / `run_statistical_model` / …), sichtbare 🔧-Tool-Trace + Erklärung. Endet mit `data: [DONE]`. |
+| GET | `/analyze/{ticker}?current_prices=<json>&agentic=false` | **SSE-Stream** Alt-A-Einzelanalyse (deterministisches Ensemble + Evidence-gegate Begründung). *Vorhanden, aber nicht mehr in der UI.* |
 | GET | `/analyze-portfolio?current_prices=<json>` | **SSE-Stream** Portfolio-Analyse (Ensemble je Position + LLM-Zusammenfassung) |
 | GET | `/chat?question=<text>&current_prices=<json>` | **SSE-Stream** Freitext-Chat mit Tool-Agent |
 | GET | `/news-summary/{ticker}` | **SSE-Stream** News-Zusammenfassung (Themen + Risiken) |

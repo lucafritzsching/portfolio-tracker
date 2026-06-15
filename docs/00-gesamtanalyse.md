@@ -65,6 +65,12 @@ Bewusst variiert wird **nur der Ziel-Typ** — und damit, **wo** das LLM sitzt (
 - Weitere NL-Quellen (Reddit) hinter `NLItem`; Multi-Agent (Achse C) als dokumentierte Zukunft.
 
 ## Demo-Ablauf (Vorschlag für die Präsentation)
+> **Aktualisiert (Refactor, ADR-16/17):** Es gibt nur noch **ein Chat-Fenster (KI-Agent)**, das je nach
+> Anfrage routet (sichtbare 🔧-Trace). Demo = drei Anfragetypen nacheinander: **Statistik** („ARIMA/RF-Signal
+> für AAPL?") · **News/Klarsprache** („Hat AAPL zuletzt gute News?", sektor-agnostisch, beleggebunden) ·
+> **Strategie** („Finde Nasdaq-Biotech < 15 Mrd., > 20 % Wachstum, Turnaround"). Architektur: Flowchart 8
+> ([refactor_flowcharts.md](refactor_flowcharts.md)); DS-Ehrlichkeit: [12-data-science-methodik.md](12-data-science-methodik.md).
+> Die folgenden Tab-Schritte sind **überholt** (historischer Kontext):
 1. **Finder** (Tab „Alt B" → Strategie-Finder): Freitext-Mandat → deterministischer Live-Screen →
    NL-Agent rangiert die Top-N. Zeigt Alt-Bs *Discovery*-Fähigkeit (Alt A „findet" nicht).
 2. **Vergleich** (Tab „Vergleich"): ein Kandidat/Ticker → Alt A *neben* Alt B; je Toggle 1-Call ↔

@@ -607,3 +607,54 @@ dokumentierter Einzeiler-Fix, kein Modellproblem."
 beiden Modi, also 36 Läufe gegen das echte Qwen3:14b. Wichtig für die Einordnung — wir validieren Urteilsqualität
 und Halluzinationsschutz, ausdrücklich keine Trading-Performance und keine Renditen. Das ist eine bewusste
 Scope-Grenze, kein Versäumnis."
+
+---
+
+# Flowchart 8 — Router-Agent: ein Chat, drei Wege (aktuelle Architektur)
+
+> **Supersedes die getrennten Oberflächen.** Statt KI-Analyse / Alt-B-Finder / Vergleichs-View gibt es
+> jetzt **ein Chat-Fenster**. Der Agent **routet** eine Freitext-Anfrage per nativem Tool-Calling zum
+> passenden Werkzeug und erklärt nachvollziehbar, was er tut. Der „Alt-A vs. Alt-B"-Vergleich (Flowchart 7)
+> ist damit **konzeptionell** — deterministische Statistik-Tools vs. LLM-NL-Urteil **im selben Agenten** —
+> und keine eigene UI mehr. Auch der Halluzinationsschutz änderte sich: **kein Biotech-Regex-Clamp** mehr,
+> sondern **Belegbindung** (Flowcharts 2/3 beschreiben den alten, geklammerten NL-Pfad; aktuell siehe unten).
+
+```mermaid
+flowchart TD
+    Q["Freitext-Frage<br/>GET /api/agent/ask"] --> LLM{"Router-LLM<br/>qwen3, tool-calling, T=0"}
+    LLM -->|"News / Klarsprache"| NL["judge_news(ticker, criterion)<br/>Relevanz → LLM-Urteil → Belegbindung"]
+    LLM -->|"statistisch / quantitativ"| ST["run_statistical_model / technicals<br/>ARIMA + RandomForest + Indikatoren"]
+    LLM -->|"finde Unternehmen…"| SC["screen_by_strategy(mandate)<br/>yfinance EquityQuery (deterministisch)"]
+    SC -->|"Top-N Kandidaten"| NL
+    NL --> SYN["Synthese: Anfrage erklärt,<br/>Werkzeug genannt, echte Werte,<br/>vorsichtiger Schluss"]
+    ST --> SYN
+    SYN --> A["Antwort + sichtbare 🔧-Tool-Trace + Server-Log"]
+
+    classDef det fill:#e8f0fe,stroke:#3367d6,color:#173a8a;
+    classDef llm fill:#fef7e0,stroke:#f9ab00,color:#7a5900;
+    class ST,SC det;
+    class NL,LLM llm;
+```
+
+```
+Frage ──► Router-LLM (tool-calling)
+              ├── News/Klarsprache ─► judge_news  (Relevanz → LLM → Belegbindung)
+              ├── statistisch       ─► run_statistical_model / technicals (ARIMA+RF, deterministisch)
+              └── "finde …"         ─► screen_by_strategy (yfinance) ─► judge_news je Kandidat
+                                              │
+                                              ▼  Synthese + 🔧-Trace + Log ─► Antwort
+```
+
+## Drei Beispiel-Anfragen (live gegen qwen3 verifiziert)
+- **NL/News:** „Hat AAPL zuletzt gute News?" → `judge_news` → Relevanz-Filter (Apple) → LLM zitiert **echte**
+  Apple-Schlagzeilen (Belegbindung; Off-topic wie SpaceX rausgefiltert) → Urteil + Signifikanz + Belege.
+- **Statistik:** „ARIMA/RF-Signal für TSLA?" → `run_statistical_model` → ARIMA (95%-Intervall → ehrliche
+  Konfidenz) + RandomForest (Vorhersage auf aktuellem Bar + Out-of-Sample-Genauigkeit) → Erklärung.
+- **Strategie:** „Finde Nasdaq-Biotech < 15 Mrd., > 20 % Wachstum mit Turnaround" → `screen_by_strategy`
+  (deterministischer Live-Screen) → `judge_news` für die Top-Kandidaten → rangierte Erklärung.
+
+**Halluzinationsschutz (sektor-agnostisch):** Das NL-Urteil ist **nicht** mehr auf eine Biotech-Rubrik
+geklemmt; ein „Treffer" muss **echte Schlagzeilen zitieren**, sonst kein Treffer. Die Statistik ist
+deterministisch und **ehrlich ausgewiesen** (Konfidenz aus dem Prognoseintervall, Out-of-Sample-Genauigkeit).
+Reproduzierbar: [evidence/router_harness.py](evidence/router_harness.py). Methodik + Befunde:
+[12-data-science-methodik.md](12-data-science-methodik.md), [evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md).

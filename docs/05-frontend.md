@@ -1,5 +1,9 @@
 # 5. Frontend (Vue 3 + TypeScript)
 
+> **Refactor-Hinweis (ADR-16):** Die getrennten Agenten-Views (KI-Analyse, Alt-B, Vergleich) sind zu
+> **einem Chat-Fenster** zusammengeführt (`ChatView.vue`, „KI-Agent", ruft `GET /api/agent/ask`). Unten
+> beschriebene Einzel-Views/Nav sind teils historischer Kontext.
+
 ## Struktur
 
 ```

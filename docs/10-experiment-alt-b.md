@@ -1,5 +1,10 @@
 # 10. Alt-B-Experiment: NL-Ziel-Agent (Freitext → Output)
 
+> **Refactor-Hinweis (ADR-17):** Der NL-Ziel-Agent ist jetzt **sektor-agnostisch + beleggebunden**
+> (Relevanz + Subjekt-Fokus + Pflicht-Zitate echter Schlagzeilen) — die unten beschriebene
+> **Regex-Clamp/Biotech-Rubrik** ist abgelöst (Anti-Halluzination jetzt über Belegbindung). Die
+> `fast`/`agentic`- und `think:false`-Befunde bleiben gültig. Aktuell: ADR-17 + Flowchart 8.
+
 > Worum es bei Alt-B wirklich geht — und wie man die Ergebnisse liest. Ergänzt ADR-13/ADR-14
 > ([07-entscheidungslog.md](07-entscheidungslog.md)) und das Agent-Design ([03-agent-design.md](03-agent-design.md)).
 
