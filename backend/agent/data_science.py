@@ -162,22 +162,25 @@ def run_arima_forecast(prices: list[dict]) -> ModelForecast:
         df = df.sort_values("date")
         close = df["close"].astype(float).values
 
-        # Fit ARIMA(2,1,2) – reasonable default for stock prices
-        model = ARIMA(close, order=(2, 1, 2))
-        fit = model.fit()
+        # Fixed order (2,1,2) as a documented baseline — no per-series order search (siehe DS-Methodik-Doku).
+        fit = ARIMA(close, order=(2, 1, 2)).fit()
 
-        # Forecast 30 steps ahead
-        forecast_result = fit.forecast(steps=30)
-        f7 = float(forecast_result[6])
-        f30 = float(forecast_result[29])
+        # Forecast + 95% prediction interval (statsmodels get_forecast).
+        fc = fit.get_forecast(steps=30)
+        mean = fc.predicted_mean
+        ci = fc.conf_int(alpha=0.05)
         current = float(close[-1])
+        f7, f30 = float(mean[6]), float(mean[29])
+        lo30, hi30 = float(ci[29][0]), float(ci[29][1])
 
         change_7d = (f7 - current) / current * 100
         change_30d = (f30 - current) / current * 100
 
-        # Simple confidence from AIC (lower = better; normalize roughly)
-        aic = fit.aic
-        confidence = max(0.1, min(0.9, 1.0 - abs(aic) / 10000))
+        # Ehrliche Konfidenz aus dem Signal-Rausch-Verhältnis der Prognose: vorhergesagte Bewegung
+        # relativ zur halben Intervallbreite (NICHT mehr 1-|AIC|/10000, das war statistisch sinnlos).
+        # Breites Intervall → niedrige Konfidenz.
+        half = (hi30 - lo30) / 2
+        confidence = 0.0 if half <= 0 else max(0.05, min(0.95, abs(f30 - current) / half))
 
         if change_30d > 5:
             signal = "BUY"
@@ -187,10 +190,9 @@ def run_arima_forecast(prices: list[dict]) -> ModelForecast:
             signal = "HOLD"
 
         details = (
-            f"ARIMA(2,1,2) Prognose: "
-            f"+7 Tage: {f7:.2f} ({change_7d:+.1f}%), "
-            f"+30 Tage: {f30:.2f} ({change_30d:+.1f}%). "
-            f"AIC: {aic:.0f}, Konfidenz: {confidence:.0%}"
+            f"ARIMA(2,1,2): +7T {f7:.2f} ({change_7d:+.1f}%), +30T {f30:.2f} ({change_30d:+.1f}%); "
+            f"95%-Intervall +30T [{lo30:.2f}, {hi30:.2f}]; Konfidenz {confidence:.0%} "
+            f"(Prognose-Bewegung vs. Intervallbreite)."
         )
 
         return ModelForecast(
@@ -228,13 +230,14 @@ def run_ml_signal(prices: list[dict]) -> ModelForecast:
     try:
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.preprocessing import StandardScaler
+        from sklearn.metrics import accuracy_score
 
         df = pd.DataFrame(prices)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
         close = df["close"].astype(float)
 
-        # Feature engineering
+        # Feature engineering (ausschließlich aus Vergangenheitsdaten)
         df["rsi"] = _rsi(close, 14)
         ema12 = close.ewm(span=12).mean()
         ema26 = close.ewm(span=26).mean()
@@ -246,42 +249,45 @@ def run_ml_signal(prices: list[dict]) -> ModelForecast:
         df["price_vs_sma20"] = (close - df["sma20"]) / df["sma20"]
         df["price_vs_sma50"] = (close - df["sma50"]) / df["sma50"]
 
-        # Label: forward 20-day return > 3% → BUY=2, < -3% → SELL=0, else HOLD=1
+        # Label aus der ZUKUNFT: 20-Tage-Vorwärtsrendite >3% → BUY=2, <-3% → SELL=0, sonst HOLD=1.
         df["future_return"] = close.pct_change(20).shift(-20)
-        df["label"] = 1  # HOLD
-        df.loc[df["future_return"] > 0.03, "label"] = 2   # BUY
-        df.loc[df["future_return"] < -0.03, "label"] = 0  # SELL
+        df["label"] = 1
+        df.loc[df["future_return"] > 0.03, "label"] = 2
+        df.loc[df["future_return"] < -0.03, "label"] = 0
 
         feature_cols = ["rsi", "macd", "volatility", "momentum", "price_vs_sma20", "price_vs_sma50"]
-        df_clean = df[feature_cols + ["label"]].dropna()
-
-        if len(df_clean) < 50:
+        feats = df[feature_cols].dropna()                 # alle Zeilen mit gültigen Features (inkl. HEUTE)
+        labeled = df[feature_cols + ["label"]].dropna()   # nur Zeilen mit Features UND Label → Training
+        if len(labeled) < 60 or feats.empty:
             raise ValueError("Zu wenige saubere Datenpunkte")
 
-        X = df_clean[feature_cols].values
-        y = df_clean["label"].values
+        X_all = labeled[feature_cols].values
+        y_all = labeled["label"].values
 
-        # Train on all but last 20 rows, predict on last row
-        X_train, X_pred = X[:-20], X[-1:]
-        y_train = y[:-20]
+        # Ehrliche Out-of-Sample-Genauigkeit: zeitgeordneter Holdout (letzte 20 % als Test).
+        split = int(len(X_all) * 0.8)
+        test_acc = None
+        if len(X_all) - split >= 5:
+            sc_eval = StandardScaler().fit(X_all[:split])
+            clf_eval = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+            clf_eval.fit(sc_eval.transform(X_all[:split]), y_all[:split])
+            test_acc = float(accuracy_score(y_all[split:], clf_eval.predict(sc_eval.transform(X_all[split:]))))
 
-        scaler = StandardScaler()
-        X_train_s = scaler.fit_transform(X_train)
-        X_pred_s = scaler.transform(X_pred)
-
+        # Finales Modell auf ALLEN gelabelten Daten; Vorhersage auf dem AKTUELLEN Bar (letzte Feature-Zeile).
+        scaler = StandardScaler().fit(X_all)
         clf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
-        clf.fit(X_train_s, y_train)
+        clf.fit(scaler.transform(X_all), y_all)
+        X_pred = scaler.transform(feats.iloc[[-1]].values)
+        pred = int(clf.predict(X_pred)[0])
+        proba_by_class = dict(zip(clf.classes_.tolist(), clf.predict_proba(X_pred)[0].tolist()))
+        confidence = float(max(proba_by_class.values()))
+        signal = {0: "SELL", 1: "HOLD", 2: "BUY"}[pred]
 
-        pred = clf.predict(X_pred_s)[0]
-        proba = clf.predict_proba(X_pred_s)[0]
-        confidence = float(max(proba))
-        label_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
-        signal = label_map[pred]
-
+        acc_txt = f", Holdout-Genauigkeit {test_acc:.0%}" if test_acc is not None else ""
         details = (
-            f"Random Forest (100 Bäume, {len(X_train)} Trainingspunkte): "
-            f"Signal={signal}, "
-            f"P(SELL)={proba[0]:.1%}, P(HOLD)={proba[1]:.1%}, P(BUY)={proba[2]:.1%}"
+            f"Random Forest (100 Bäume, {len(X_all)} gelabelte Punkte, Vorhersage auf aktuellem Bar): "
+            f"Signal={signal}, P(SELL)={proba_by_class.get(0, 0.0):.0%}, "
+            f"P(HOLD)={proba_by_class.get(1, 0.0):.0%}, P(BUY)={proba_by_class.get(2, 0.0):.0%}{acc_txt}"
         )
 
         return ModelForecast(
