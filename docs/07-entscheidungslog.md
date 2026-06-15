@@ -151,6 +151,33 @@ bewusst NICHT in `score_alt_b` verdrahtet (Freitext→Output ist das Ziel, nicht
 Reddit/weitere NL-Quellen hinter `NLItem`, Multi-Agent-Orchestrierung, ein Backtest. Details:
 [10-experiment-alt-b.md](10-experiment-alt-b.md).
 
+## ADR-15 – Demo: Alt A vs. Alt B vergleichbar (zwei Fenster) + Strategie-Finder + Determinismus-vs-LLM gemessen
+**Kontext:** Für die Präsentation sollen **beide** Alternativen verglichen/erklärt und die Wochenarbeit
+gezeigt werden – **ohne** die Logik zu konsolidieren, **ohne** Alt A zu verändern, minimal und demo-stabil
+(LLM ist der Compute-Flaschenhals, nicht ARIMA/RF=CPU). Erkenntnis: die Modus-Achse „1 LLM-Call vs.
+Tool-Calling-Agent" existiert in **beiden** bereits (Alt-A `agentic`-Flag; Alt-B `mode` fast/agentic) –
+es fehlte nur eine **Gegenüberstellung**.
+**Entscheidung:**
+- **Strategie-Finder** als Alt-B-*Discovery* (`services/finder.py`, `agent/finder_runner.py`,
+  `GET /api/agent/finder`, AltBView-Tab): Freitext-*Mandat* → LLM-Parse (im Trace sichtbar) →
+  **deterministischer** `yf.screen` (yfinance 1.4.1, serverseitig) → NL-Agent (`evaluate_nl_target`)
+  **nur** auf die Top-N Überlebenden → Rangliste + Trace. Bounded (1 Screen-Call + gedeckelte LLM-Calls),
+  Fallback-Universum bei Yahoo-Ausfall. Kein Eingriff in Alt A.
+- **Vergleichs-View** (`views/ComparisonView.vue`, rein Frontend): EIN Input (Ticker + NL-Kriterium) →
+  **zwei Spalten**, die die **bestehenden** Endpoints aufrufen (`/agent/analyze/{ticker}`,
+  `/agent/nl-target`): links Alt-A (Code entscheidet, LLM erklärt, Evidence-Gate) neben rechts Alt-B
+  (LLM beurteilt, regex-Clamp). Je Spalte Toggle 1-Call ↔ Tool-Agent. **Bewusst keine Logik-Konsolidierung.**
+- **Determinismus-vs-LLM gemessen** (read-only): agentic 89 % vs. fast 78 %; geführt (Clamp) 81 % vs. pur
+  78 % bei 0 vs. 2 False-Positives; `think:false`/`true` → Latenz 4–10×, gleiches Kern-Urteil. Belege:
+  [evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md), [think_mode_findings.md](evidence/think_mode_findings.md).
+**Begründung:** maximale Vergleichbarkeit/Erklärkraft bei **minimalem Risiko** (echte Pipelines, Alt A
+unangetastet). Die deterministischen Leitplanken (Ensemble/Evidence bei A, Clamp/Prefilter bei B) tragen
+die Qualität **messbar** mit – die Kernthese beider Alternativen.
+**Konsequenz / Trade-off:** Multi-Agent bleibt **Ausblick** (nicht gebaut); der Finder wird **nicht** mit
+Alt-As Ensemble verdrahtet (das wäre Konsolidierung); `think:false` ist Default (Fix `cc4e2e9`). Eval-Zahlen
+stammen von **vor** dem think-Fix → Re-Run offen. Der regex-Guard ist nicht gratis (unterdrückte 1 korrektes
+Urteil, da die `event_strength`-Rubrik biotech-getunt ist).
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)

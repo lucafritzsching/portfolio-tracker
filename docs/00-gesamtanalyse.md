@@ -16,6 +16,12 @@ vergleichbare Agenten (**Alt-A** deterministisch, **Alt-B** NL-Freitext) auf gem
 - **Messbares Ergebnis (Alt-B-Validierung, 36 Läufe):** Trefferquote **83 %** (fast 78 % / agentic 89 %),
   **0 Halluzinationen** (3 vom Clamp geblockt). ⚠️ *Stand vor dem `think:false`-Fix; Re-Run ausstehend —
   erwartete Verbesserung bei fast-Genauigkeit + Latenz.*
+- **Diese Woche gebaut:** Strategie-**Finder** (Alt-B-Discovery: Freitext-Mandat → deterministischer
+  Live-Screen → NL-Agent auf Top-N) + **Vergleichs-View** (Alt A *neben* Alt B auf einem Input, zwei
+  Fenster, je Toggle „1 LLM-Call ↔ Tool-Agent") — Vergleich **ohne** Konsolidierung, Alt A unverändert.
+- **Determinismus vs. LLM gemessen** (3 Achsen): agentic **89 %** vs. fast **78 %**; geführt/Clamp **81 %**
+  vs. pures LLM **78 %** (0 vs. 2 False-Positives); `think:false`/`true` → Latenz **4–10×**, gleiches
+  Kern-Urteil → [evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md).
 
 ## Projektkarte (wo steht was?)
 
@@ -48,7 +54,8 @@ flowchart LR
 Bewusst variiert wird **nur der Ziel-Typ** — und damit, **wo** das LLM sitzt (erklären vs. entscheiden-begrenzt).
 
 ## Was getestet wurde — und was nicht
-- ✅ **Getestet:** Freitext-Urteilsqualität, Halluzinationsschutz (Clamp), `fast` vs. `agentic`, konfigurierbares Ziel.
+- ✅ **Getestet:** Freitext-Urteilsqualität, Halluzinationsschutz (Clamp), `fast` vs. `agentic`, konfigurierbares Ziel,
+  **Determinismus vs. LLM** (Clamp-Guard, `think:false`/`true`) → [evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md).
 - ❌ **Nicht getestet:** Trading-Performance/Renditen, statistische Repräsentativität (n=18), modusübergreifender Determinismus.
 *(Details + Musterantworten: [refactor_validation.md](refactor_validation.md), [refactor_flowcharts.md](refactor_flowcharts.md) → Flowchart 5.)*
 
@@ -56,6 +63,16 @@ Bewusst variiert wird **nur der Ziel-Typ** — und damit, **wo** das LLM sitzt (
 - `think:false`-Fix evaluieren (Re-Run) → fast-Genauigkeit + Latenz quantifizieren.
 - Decision-Trace tiefer in den NL-Agent ziehen; Regex-vs-LLM-Divergenz als explizite Metrik.
 - Weitere NL-Quellen (Reddit) hinter `NLItem`; Multi-Agent (Achse C) als dokumentierte Zukunft.
+
+## Demo-Ablauf (Vorschlag für die Präsentation)
+1. **Finder** (Tab „Alt B" → Strategie-Finder): Freitext-Mandat → deterministischer Live-Screen →
+   NL-Agent rangiert die Top-N. Zeigt Alt-Bs *Discovery*-Fähigkeit (Alt A „findet" nicht).
+2. **Vergleich** (Tab „Vergleich"): ein Kandidat/Ticker → Alt A *neben* Alt B; je Toggle 1-Call ↔
+   Tool-Agent. Zeigt **wo das LLM sitzt** (Erklärer vs. Entscheider) und beide Halluzinations-Guards live.
+3. **Determinismus vs. LLM**: die gemessenen Achsen ([evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md))
+   + der `think:false`/`true`-Befund ([evidence/think_mode_findings.md](evidence/think_mode_findings.md)).
+4. **Architektur & Ausblick**: Flowcharts + Multi-Agent als nächste Achse.
+> Voraussetzung: Backend mit `qwen3:14b` neu gestartet (`.env` ist gesetzt).
 
 ## Verteidigung (Schnellzugriff)
 30 vorbereitete Professorenfragen + Musterantworten: [refactor_architecture.md](refactor_architecture.md) §11.
