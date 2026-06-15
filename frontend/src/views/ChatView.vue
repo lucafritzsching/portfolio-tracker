@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { api } from '@/api/client'
 import { useMarkdown } from '@/composables/useMarkdown'
+import type { AgentStatus } from '@/types'
 
+// THE single agent window. One free-text question → the backend routing agent picks the right tool
+// (strategy screen / NL-news judgment / statistics) and streams a visible tool-trace + explanation.
 const portfolio = usePortfolioStore()
 const md = useMarkdown()
 
@@ -12,12 +15,63 @@ const answer = ref('')
 const running = ref(false)
 const history = ref<{ q: string; a: string }[]>([])
 
+// ── Setup / Agent status (moved here from the old analysis view) ──────────────
+const agentStatus = ref<AgentStatus | null>(null)
+const statusLoading = ref(false)
+const warming = ref(false)
+const warmMsg = ref('')
+const pulling = ref(false)
+const pullLog = ref('')
+
+onMounted(checkStatus)
+
+async function checkStatus() {
+  statusLoading.value = true
+  try { agentStatus.value = await api.agent.status() } finally { statusLoading.value = false }
+}
+
+async function warmup() {
+  warming.value = true
+  warmMsg.value = ''
+  try {
+    const res = await api.marketData.warmup()
+    warmMsg.value = `✓ Daten für ${res.warmed_up} Ticker vorbereitet.`
+  } catch (e: any) {
+    warmMsg.value = 'Fehler: ' + e.message
+  } finally {
+    warming.value = false
+  }
+}
+
+async function pullModel() {
+  pulling.value = true
+  pullLog.value = 'Modell wird geladen…\n'
+  const resp = await api.agent.pullModel()
+  const reader = resp.body!.getReader()
+  const decoder = new TextDecoder()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    for (const line of decoder.decode(value).split('\n').filter(l => l.startsWith('data: '))) {
+      const data = line.replace('data: ', '')
+      if (data === '[DONE]') { pulling.value = false; await checkStatus(); return }
+      try {
+        const p = JSON.parse(data)
+        if (p.status) pullLog.value += p.status + (p.total ? ` (${p.completed ?? 0}/${p.total})` : '') + '\n'
+      } catch { /* ignore */ }
+    }
+  }
+  pulling.value = false
+  await checkStatus()
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
 function ask() {
   const q = question.value.trim()
   if (!q || running.value) return
   running.value = true
   answer.value = ''
-  const source = api.agent.chat(q, portfolio.currentPrices)
+  const source = api.agent.ask(q, portfolio.currentPrices)
   source.onmessage = (e) => {
     if (e.data === '[DONE]') {
       running.value = false
@@ -38,16 +92,43 @@ function ask() {
 
 <template>
   <div>
-    <h2 class="section-title">KI-Chat</h2>
+    <h2 class="section-title">KI-Agent</h2>
+
+    <!-- Agent status / setup -->
+    <div v-if="agentStatus" class="card" style="margin-bottom: 16px">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px">
+        <div style="font-size: 13px">
+          <strong>Ollama-Agent</strong>
+          <span v-if="agentStatus.ollama_reachable && agentStatus.model_available" class="badge badge-buy" style="margin-left: 8px">Bereit</span>
+          <span v-else-if="agentStatus.ollama_reachable" class="badge badge-watch" style="margin-left: 8px">Modell fehlt</span>
+          <span v-else class="badge badge-sell" style="margin-left: 8px">Nicht erreichbar</span>
+          <span style="color: var(--text-secondary); margin-left: 8px">Modell: <strong>{{ agentStatus.model }}</strong></span>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <button class="btn btn-sm" @click="checkStatus" :disabled="statusLoading"><span v-if="statusLoading" class="spinner" /> ↻ Status</button>
+          <button class="btn btn-sm" @click="warmup" :disabled="warming || portfolio.positions.length === 0" title="Kurse/Fundamentaldaten/News der Depot-Ticker vorab cachen">
+            <span v-if="warming" class="spinner" /> ⬇ Daten vorbereiten
+          </button>
+          <button v-if="agentStatus.ollama_reachable && !agentStatus.model_available" class="btn btn-primary btn-sm" @click="pullModel" :disabled="pulling">
+            <span v-if="pulling" class="spinner" /> Modell laden
+          </button>
+        </div>
+      </div>
+      <div v-if="warmMsg" style="margin-top: 8px; font-size: 12px; color: var(--text-secondary)">{{ warmMsg }}</div>
+      <pre v-if="pullLog" style="margin-top: 10px; font-size: 11px; background: var(--bg-secondary); padding: 10px; border-radius: 6px; max-height: 120px; overflow-y: auto">{{ pullLog }}</pre>
+    </div>
+
     <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px">
-      Freitext-Fragen zum Portfolio. Der Agent nutzt Tools für Live-Daten (auch Ticker außerhalb des Depots).
+      Stell eine Freitext-Frage. Der Agent wählt selbst das passende Werkzeug und macht die Tool-Aufrufe
+      sichtbar: <strong>Strategie-Screen</strong> (Unternehmen finden), <strong>News-/Klarsprache-Urteil</strong>
+      (beleggebunden) oder <strong>statistische Modelle</strong> (ARIMA / Random Forest / Technik).
     </p>
 
     <div class="card" style="margin-bottom: 16px">
       <textarea
         v-model="question"
         rows="3"
-        placeholder="z. B. „Ich habe 5000 €, mittleres Risiko — womit diversifizieren?“"
+        placeholder="z. B. 'Finde Nasdaq-Biotech unter 15 Mrd. mit Turnaround' · 'ARIMA-Signal für TSLA?' · 'Hat AAPL zuletzt gute News?'"
         style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px; resize: vertical"
         :disabled="running"
         @keydown.ctrl.enter="ask"
@@ -55,12 +136,15 @@ function ask() {
       <div style="margin-top: 10px; display: flex; justify-content: flex-end">
         <button class="btn btn-primary" :disabled="running || !question.trim()" @click="ask">
           <span v-if="running" class="spinner" />
-          {{ running ? 'Antwortet…' : 'Fragen' }}
+          {{ running ? 'Agent arbeitet…' : 'Fragen' }}
         </button>
       </div>
     </div>
 
     <div v-if="answer" class="card ai-box markdown" v-html="md.render(answer)"></div>
+    <div v-else-if="running" class="card ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
+      <span class="spinner" /> Agent wählt Werkzeuge und sammelt Daten…
+    </div>
 
     <div v-if="history.length > 1 || (history.length === 1 && !answer)" style="margin-top: 24px">
       <h3 class="section-title" style="font-size: 14px">Verlauf</h3>
@@ -74,7 +158,18 @@ function ask() {
 
 <style scoped>
 .markdown { white-space: normal; }
-.markdown :deep(h3) { font-size: 15px; font-weight: 800; margin: 12px 0 6px; }
+.markdown :deep(h2) { font-size: 15px; font-weight: 800; margin: 12px 0 6px; }
+.markdown :deep(h3) { font-size: 14px; font-weight: 800; margin: 12px 0 6px; }
 .markdown :deep(p) { margin: 6px 0; }
 .markdown :deep(ul) { margin: 6px 0; padding-left: 18px; }
+.markdown :deep(strong) { font-weight: 700; }
+/* visible tool-trace: the stream emits "> 🔧 Führe Tool aus: …" as blockquotes */
+.markdown :deep(blockquote) {
+  border-left: 3px solid var(--blue);
+  background: var(--bg-secondary);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
 </style>

@@ -79,39 +79,11 @@ export const api = {
     status: () => request<AgentStatus>('/agent/status'),
     pullModel: () => fetch(`${BASE}/agent/pull-model`, { method: 'POST' }),
 
-    analyzeStock: (ticker: string, currentPrices: Record<string, number>, agentic = false): EventSource => {
-      const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/analyze/${ticker}?current_prices=${pricesParam}&agentic=${agentic}`)
-    },
-
-    analyzePortfolio: (currentPrices: Record<string, number>): EventSource => {
-      const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/analyze-portfolio?current_prices=${pricesParam}`)
-    },
-
-    chat: (question: string, currentPrices: Record<string, number>): EventSource => {
+    // Unified routing agent: one free-text question → the LLM routes to the right tool
+    // (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE).
+    ask: (question: string, currentPrices: Record<string, number>): EventSource => {
       const p = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/chat?question=${encodeURIComponent(question)}&current_prices=${p}`)
-    },
-
-    nlTarget: (criterion: string, ticker: string, mode: 'fast' | 'agentic'): EventSource =>
-      new EventSource(
-        `${BASE}/agent/nl-target?ticker=${encodeURIComponent(ticker)}` +
-        `&criterion=${encodeURIComponent(criterion)}&mode=${mode}`,
-      ),
-
-    finder: (mandate: string, mode: 'fast' | 'agentic', maxCandidates = 8): EventSource =>
-      new EventSource(
-        `${BASE}/agent/finder?mandate=${encodeURIComponent(mandate)}` +
-        `&mode=${mode}&max_candidates=${maxCandidates}`,
-      ),
-
-    newsSummary: (ticker: string): EventSource =>
-      new EventSource(`${BASE}/agent/news-summary/${ticker}`),
-
-    rebalance: (currentPrices: Record<string, number>): EventSource => {
-      const p = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/rebalance?current_prices=${p}`)
+      return new EventSource(`${BASE}/agent/ask?question=${encodeURIComponent(question)}&current_prices=${p}`)
     },
   },
 

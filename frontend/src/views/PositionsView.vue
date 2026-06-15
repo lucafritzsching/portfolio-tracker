@@ -111,7 +111,7 @@ async function removePosition(ticker: string) {
           {{ expandedTicker === pos.ticker ? 'Verlauf ausblenden' : 'Verlauf' }}
           ({{ pos.transactions?.length ?? 0 }})
         </button>
-        <button class="btn btn-sm" @click="ui.navigate('analysis')">KI-Analyse</button>
+        <button class="btn btn-sm" @click="ui.navigate('chat')">KI-Agent</button>
         <button class="btn btn-sm btn-danger" @click="removePosition(pos.ticker)">Löschen</button>
       </div>
 

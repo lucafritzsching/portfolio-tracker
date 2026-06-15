@@ -8,6 +8,7 @@ The LLM never overrides the decision — it only explains it.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -21,12 +22,15 @@ from agent.tools import TOOL_DEFINITIONS, ToolExecutor
 from agent.prompts import (
     SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT,
     CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT, NEWS_SUMMARY_PROMPT, REBALANCE_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
 )
 from config import settings
 from eval.faithfulness import check_faithfulness, apply_faithfulness_gate
 from agent.evidence import render as render_evidence
 from models import Position, AnalysisResult, AnalysisMetric
 from services.market_data import fetch_and_store_news
+
+logger = logging.getLogger("agent")
 
 _COMPONENT_LABELS = {
     "technical": "Technischer Trend",
@@ -156,6 +160,7 @@ async def _run_agent_loop(
     stats: dict | None = None,
     show_tools: bool = True,
     stream_final: bool = True,
+    temperature: float = 0.3,
 ) -> AsyncGenerator[str, None]:
     """Tool-use loop: the LLM may call tools; the final answer is streamed or returned as one block."""
     iteration = 0
@@ -168,7 +173,7 @@ async def _run_agent_loop(
             "stream": False,
             "think": False,
             "tools": TOOL_DEFINITIONS if not is_last else [],
-            "options": {"temperature": 0.3},
+            "options": {"temperature": temperature},
         }
         async with httpx.AsyncClient(timeout=180) as client:
             try:
@@ -176,6 +181,7 @@ async def _run_agent_loop(
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
+                logger.exception("Ollama-Anfrage fehlgeschlagen (Iteration %d)", iteration)
                 yield f"\n\n[Fehler bei Ollama-Anfrage: {e}]"
                 return
 
@@ -183,6 +189,8 @@ async def _run_agent_loop(
         tool_calls = message.get("tool_calls", [])
         if not tool_calls:
             tool_calls = _extract_text_tool_calls(message.get("content", ""))
+        logger.info("Agent-Loop It. %d: %d Tool-Call(s)%s", iteration, len(tool_calls),
+                    "" if tool_calls else " → finale Antwort")
         if not tool_calls:
             if stream_final:
                 async for token in _stream_ollama_response(messages, stats):
@@ -325,6 +333,27 @@ async def chat_stream(
     ]
     executor = ToolExecutor(db=db, current_prices=current_prices)
     async for chunk in _run_agent_loop(messages, executor, show_tools=False):
+        yield chunk
+
+
+async def ask_stream(
+    question: str, db: AsyncSession, current_prices: dict[str, float] | None = None
+) -> AsyncGenerator[str, None]:
+    """Unified routing agent: ONE free-text question → the LLM picks the right tool(s) →
+    visible tool-trace + a grounded German explanation. Routing is via native Ollama tool-calling
+    (temperature 0 for reproducibility); the tools are deterministic/guarded (screen, NL-clamp, DS).
+    """
+    question = (question or "").strip()
+    if not question:
+        yield "_Keine Frage angegeben._\n"
+        return
+    logger.info("ask_stream: %r", question[:200])
+    messages = [
+        {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+    executor = ToolExecutor(db=db, current_prices=current_prices or {})
+    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0):
         yield chunk
 
 

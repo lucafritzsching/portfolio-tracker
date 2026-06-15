@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -17,7 +19,13 @@ from agent.data_science import (
     run_ml_signal,
 )
 from models import Position, Transaction, NewsCache
-from services.market_data import fetch_and_store_prices, prices_to_dicts
+from services.market_data import fetch_and_store_prices, prices_to_dicts, fetch_and_store_news
+from services.finder import (
+    DEFAULT_MAX_CANDIDATES, load_fallback_universe, parse_mandate, run_screen,
+)
+from services.nl_target import NLItem, evaluate_nl_target
+
+logger = logging.getLogger("agent")
 
 # ── Tool schemas for Ollama (OpenAI-compatible format) ───────────────────────
 
@@ -109,6 +117,43 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_by_strategy",
+            "description": ("Findet Aktien zu einer Freitext-STRATEGIE (Beispiel: Nasdaq Biotech, "
+                            "<15 Mrd. Market Cap, >20% Umsatzwachstum). Wandelt das Mandat in harte Filter "
+                            "(Börse/Sektor/Market-Cap/Umsatzwachstum) und liefert passende Kandidaten "
+                            "(Ticker, Name, Market Cap). Nutze dies, wenn der Nutzer Unternehmen SUCHEN/"
+                            "SCREENEN will, statt einen einzelnen Ticker zu nennen."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mandate": {"type": "string", "description": "Die Anlagestrategie als Freitext"},
+                },
+                "required": ["mandate"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "judge_news",
+            "description": ("Beurteilt anhand aktueller Schlagzeilen, ob eine Aktie ein FREITEXT-KRITERIUM "
+                            "in Klarsprache erfüllt (Beispiele: hat aktuell eine Turnaround-Story; zuletzt "
+                            "gute News). Liefert ein geklammertes Urteil (matches, Signifikanz 0-5), "
+                            "Begründung, Belege und den Determinismus-Trace (regex-Basis vs. LLM). Nutze "
+                            "dies für News-/Sentiment-/Narrativ-Fragen in natürlicher Sprache."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Ticker-Symbol"},
+                    "criterion": {"type": "string", "description": "Das Freitext-Kriterium in Klarsprache"},
+                },
+                "required": ["ticker", "criterion"],
+            },
+        },
+    },
 ]
 
 
@@ -119,6 +164,7 @@ class ToolExecutor:
         self.db = db
         self.current_prices = current_prices or {}
         self._price_cache: dict[str, list[dict]] = {}
+        self._name_cache: dict[str, str] = {}
 
     async def execute(self, tool_name: str, arguments: dict) -> str:
         handlers = {
@@ -128,14 +174,23 @@ class ToolExecutor:
             "get_news": self._get_news,
             "run_statistical_model": self._run_statistical_model,
             "get_portfolio_context": self._get_portfolio_context,
+            "screen_by_strategy": self._screen_by_strategy,
+            "judge_news": self._judge_news,
         }
         handler = handlers.get(tool_name)
         if not handler:
+            logger.warning("Unbekanntes Tool angefragt: %s", tool_name)
             return json.dumps({"error": f"Unbekanntes Tool: {tool_name}"})
+        logger.info("Tool-Call: %s(%s)", tool_name, arguments)
+        t0 = time.perf_counter()
         try:
-            return await handler(**arguments)
+            result = await handler(**arguments)
+            logger.info("Tool-OK: %s in %.2fs", tool_name, time.perf_counter() - t0)
+            return result
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            # Traceback ins Server-Log (statt stumm im SSE-String zu verschwinden) + JSON-Fehler zurück.
+            logger.exception("Tool-FEHLER: %s(%s)", tool_name, arguments)
+            return json.dumps({"error": f"{type(e).__name__}: {e}"})
 
     async def _get_historical_prices(self, ticker: str, period: str = "1y") -> str:
         ticker = ticker.upper()
@@ -308,6 +363,81 @@ class ToolExecutor:
             "unrealized_pnl_pct": round(unrealized_pnl_pct, 2) if unrealized_pnl_pct is not None else None,
             "note": pos.note,
         })
+
+    async def _screen_by_strategy(self, mandate: str) -> str:
+        """Strategie-Vorfilter: Mandat → harte Filter → yfinance-Screen (Fallback-Universum)."""
+        parsed = await parse_mandate(mandate)
+        candidates, source = await run_screen(parsed.filters)
+        if not candidates:
+            candidates = load_fallback_universe()
+            source = "fallback_universe"
+        top = candidates[:DEFAULT_MAX_CANDIDATES]
+        return json.dumps({
+            "mandate": mandate,
+            "parsed_filters": parsed.filters,
+            "nl_criterion": parsed.nl_criterion,
+            "source": source,
+            "candidate_count": len(candidates),
+            "candidates": [
+                {
+                    "ticker": c.ticker,
+                    "name": c.name,
+                    "market_cap_bn": round(c.market_cap / 1e9, 2) if c.market_cap else None,
+                }
+                for c in top
+            ],
+        }, ensure_ascii=False)
+
+    async def _company_name(self, ticker: str) -> str:
+        """Company name for the relevance filter (cached per run). Falls back to '' on failure."""
+        if ticker in self._name_cache:
+            return self._name_cache[ticker]
+        name = ""
+        try:
+            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
+            name = info.get("shortName") or info.get("longName") or ""
+        except Exception:
+            name = ""
+        self._name_cache[ticker] = name
+        return name
+
+    async def _judge_news(self, ticker: str, criterion: str) -> str:
+        """NL-Urteil: aktuelle Schlagzeilen gegen ein Freitext-Kriterium (sektor-agnostisch, beleggebunden).
+
+        Filtert die News per Ticker/Name auf das Unternehmen (sonst kann der Finnhub-Feed themenfremde
+        Artikel einschleusen), dann beurteilt das LLM das Kriterium und muss echte Schlagzeilen zitieren.
+        """
+        ticker = ticker.upper()
+        news = await fetch_and_store_news(ticker, self.db, days=14)
+        if not news:
+            return json.dumps({
+                "ticker": ticker, "criterion": criterion, "matches": False,
+                "message": "Keine aktuellen Schlagzeilen gefunden — keine NL-Beurteilung möglich.",
+            }, ensure_ascii=False)
+        items = []
+        for n in news:
+            headline = (getattr(n, "headline", "") or "").strip()
+            summary = (getattr(n, "summary", "") or "").strip()
+            text = f"{headline}. {summary}".strip() if summary else headline
+            if text:
+                items.append(NLItem(text=text, source=getattr(n, "source", None)))
+        name = await self._company_name(ticker)
+        verdict = await evaluate_nl_target(criterion, items, ticker=ticker, name=name, mode="fast")
+        return json.dumps({
+            "ticker": ticker,
+            "criterion": criterion,
+            "matches": verdict.matches,
+            "significance": verdict.strength,
+            "reason": verdict.reason,
+            "evidence": verdict.evidence[:3],
+            "trace": {
+                "llm_strength": verdict.llm_strength,
+                "final": verdict.strength,
+                "n_evidence_cited": len(verdict.evidence),
+                "source": verdict.source,
+            },
+            "headlines_checked": len(items),
+        }, ensure_ascii=False)
 
     async def _fetch_prices(self, ticker: str, period: str) -> list[dict]:
         """Fetch prices via the shared service, cached per analysis to avoid repeat work."""

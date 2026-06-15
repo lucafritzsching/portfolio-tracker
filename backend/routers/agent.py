@@ -1,14 +1,15 @@
 """Agent SSE streaming endpoint."""
 import json
+import logging
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from database import AsyncSessionLocal
 from agent.orchestrator import (
     analyze_stock_stream, analyze_portfolio_stream,
-    chat_stream, news_summary_stream, rebalance_stream,
+    chat_stream, news_summary_stream, rebalance_stream, ask_stream,
 )
-from agent.nl_target_runner import nl_target_stream
-from agent.finder_runner import finder_stream
+
+logger = logging.getLogger("agent")
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -80,6 +81,7 @@ def _sse(stream_factory):
                 async for chunk in stream_factory(db):
                     yield f"data: {chunk.replace(chr(10), chr(92) + 'n')}\n\n"
             except Exception as e:
+                logger.exception("SSE-Stream-Fehler")
                 yield f"data: [FEHLER: {e}]\n\n"
             finally:
                 yield "data: [DONE]\n\n"
@@ -96,24 +98,15 @@ async def chat(
     return _sse(lambda db: chat_stream(question, db, prices))
 
 
-@router.get("/nl-target")
-async def nl_target(
-    ticker: str = Query(..., description="Ticker-Symbol, z. B. AAPL"),
-    criterion: str = Query(..., description="Freitext-Kriterium, z. B. „hat aktuell eine Turnaround-Story“"),
-    mode: str = Query("fast", description="fast (1 LLM-Call) oder agentic (Tool-Loop)"),
+@router.get("/ask")
+async def ask(
+    question: str = Query(..., description="Freitext-Anfrage an den Analyse-Agenten"),
+    current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
 ):
-    """Alt-B: judge a free-text criterion for one ticker from its recent news (SSE)."""
-    return _sse(lambda db: nl_target_stream(criterion, ticker.upper(), db, mode))
-
-
-@router.get("/finder")
-async def finder(
-    mandate: str = Query(..., description="Freitext-Mandat, z. B. „Nasdaq Biotech, <15 Mrd., >20% Wachstum, Turnaround“"),
-    mode: str = Query("fast", description="fast (1 LLM-Call/Kandidat) oder agentic (Tool-Loop)"),
-    max_candidates: int = Query(8, description="Max. Kandidaten, die das LLM beurteilt (Compute-Budget)"),
-):
-    """Alt-B: find companies matching a free-text strategy — deterministic screen + NL-Agent (SSE)."""
-    return _sse(lambda db: finder_stream(mandate, db, mode, max_candidates))
+    """Unified routing agent: one free-text question → the LLM routes to the right tool
+    (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE)."""
+    prices = _parse_prices(current_prices)
+    return _sse(lambda db: ask_stream(question, db, prices))
 
 
 @router.get("/news-summary/{ticker}")
