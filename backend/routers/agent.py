@@ -8,6 +8,7 @@ from agent.orchestrator import (
     chat_stream, news_summary_stream, rebalance_stream,
 )
 from agent.nl_target_runner import nl_target_stream
+from agent.finder_runner import finder_stream
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -103,6 +104,16 @@ async def nl_target(
 ):
     """Alt-B: judge a free-text criterion for one ticker from its recent news (SSE)."""
     return _sse(lambda db: nl_target_stream(criterion, ticker.upper(), db, mode))
+
+
+@router.get("/finder")
+async def finder(
+    mandate: str = Query(..., description="Freitext-Mandat, z. B. „Nasdaq Biotech, <15 Mrd., >20% Wachstum, Turnaround“"),
+    mode: str = Query("fast", description="fast (1 LLM-Call/Kandidat) oder agentic (Tool-Loop)"),
+    max_candidates: int = Query(8, description="Max. Kandidaten, die das LLM beurteilt (Compute-Budget)"),
+):
+    """Alt-B: find companies matching a free-text strategy — deterministic screen + NL-Agent (SSE)."""
+    return _sse(lambda db: finder_stream(mandate, db, mode, max_candidates))
 
 
 @router.get("/news-summary/{ticker}")

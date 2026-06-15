@@ -100,6 +100,12 @@ export const api = {
         `&criterion=${encodeURIComponent(criterion)}&mode=${mode}`,
       ),
 
+    finder: (mandate: string, mode: 'fast' | 'agentic', maxCandidates = 8): EventSource =>
+      new EventSource(
+        `${BASE}/agent/finder?mandate=${encodeURIComponent(mandate)}` +
+        `&mode=${mode}&max_candidates=${maxCandidates}`,
+      ),
+
     newsSummary: (ticker: string): EventSource =>
       new EventSource(`${BASE}/agent/news-summary/${ticker}`),
 
