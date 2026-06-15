@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.alt_b_signal import score_alt_b as score_alt_b_core
+from services.screening_types import InsiderBuy as CoreInsiderBuy
 from services.screener import InsiderBuy, ScreenerStock, passes_base_filter, score_alt_b
 
 
@@ -40,6 +42,8 @@ def _fund(market_cap, revenue_growth):
 
 
 PRICES = [40 + i * 0.3 for i in range(160)]
+OVERSOLD = [100 - i * 0.5 for i in range(160)]
+UPTREND = [40 + i * 0.4 for i in range(160)]
 
 
 def _stock():
@@ -146,6 +150,86 @@ def test_sec_8k_event_counts_as_catalyst():
     assert score.qualifies
     assert score.score == 70
     assert any("8-K 2026-06-05" in hit for hit in score.turnaround_news)
+
+
+# ── Pure Alt-B core from alt_b_signal.py ─────────────────────────────────────
+def test_core_jazz_like_is_rejected():
+    news = [_news("Jazz Pharmaceuticals to Present Comprehensive Data at SLEEP 2026", source="Business Wire")]
+    s = score_alt_b_core(_fund(14.8e9, 0.19), _prices(UPTREND), news, [], ticker="JAZZ", name="Jazz Pharmaceuticals")
+    assert not s.qualifies
+    assert s.label == "Kein Alt-B-Signal"
+
+
+def test_core_oversold_plus_strong_catalyst_plus_insider_is_top():
+    news = [_news("XYZ Announces Positive Phase 2 Data in Lupus", source="GlobeNewswire")]
+    insider = [CoreInsiderBuy("CEO", date(2026, 6, 4), date(2026, 6, 5), 2000, 100)]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), news, insider, ticker="XYZ", name="XYZ Bio")
+    assert s.qualifies
+    assert s.label in ("Top-Treffer", "Hohe Konviktion")
+    assert s.score >= 60
+
+
+def test_core_oversold_but_no_catalyst_is_rejected():
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), [], [], ticker="ABC", name="ABC Bio")
+    assert not s.qualifies
+    assert any("kein starker Katalysator" in line for line in s.decision_log)
+
+
+def test_core_strong_catalyst_but_no_setup_is_rejected():
+    news = [_news("XYZ Announces Positive Phase 2 Data", source="GlobeNewswire")]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(UPTREND), news, [], ticker="XYZ", name="XYZ Bio")
+    assert not s.qualifies
+    assert any("kein Schwäche-Setup" in line for line in s.decision_log)
+
+
+def test_core_generic_clickbait_is_not_counted():
+    news = [_news("3 Unpopular Stocks We Find Risky", "mentions phase 3 data and fda", source="Motley Fool")]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), news, [], ticker="ABC", name="ABC Bio")
+    assert not s.qualifies
+
+
+def test_core_failed_trial_is_not_a_signal():
+    news = [_news("ABC Bio Announces Phase 3 Trial Failed to Meet Primary Endpoint", source="GlobeNewswire")]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), news, [], ticker="ABC", name="ABC Bio")
+    assert not s.qualifies
+
+
+def test_core_commentary_recap_does_not_qualify_even_oversold():
+    news = [_news("ABC Bio Is Up After Investor Conference Update", source="Yahoo")]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), news, [], ticker="ABC", name="ABC Bio")
+    assert not s.qualifies
+
+
+def test_core_sector_downtrend_suppresses_otherwise_valid_signal():
+    news = [_news("XYZ Announces Positive Phase 2 Data", source="GlobeNewswire")]
+    insider = [CoreInsiderBuy("CEO", date(2026, 6, 4), date(2026, 6, 5), 2000, 100)]
+    s = score_alt_b_core(
+        _fund(2e9, 0.10),
+        _prices(OVERSOLD),
+        news,
+        insider,
+        ticker="XYZ",
+        name="XYZ Bio",
+        sector_downtrend=True,
+    )
+    assert not s.qualifies
+    assert any("XBI" in line or "Abwärtstrend" in line for line in s.decision_log)
+
+
+def test_core_trace_records_gate_and_stage_steps():
+    news = [_news("XYZ Announces Positive Phase 2 Data", source="GlobeNewswire")]
+    insider = [CoreInsiderBuy("CEO", date(2026, 6, 4), date(2026, 6, 5), 2000, 100)]
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), news, insider, ticker="XYZ", name="XYZ Bio")
+    steps = {st.step: st for st in s.trace}
+    assert "Turnaround-Katalysator" in steps and "gate" in steps
+    assert steps["gate"].status == "ok"
+    assert steps["gate"].data["qualifies"] is True
+
+
+def test_core_trace_gate_skip_when_not_qualified():
+    s = score_alt_b_core(_fund(2e9, 0.10), _prices(OVERSOLD), [], [], ticker="ABC", name="ABC Bio")
+    gate = next(st for st in s.trace if st.step == "gate")
+    assert gate.status == "skip" and gate.data["qualifies"] is False
 
 
 if __name__ == "__main__":

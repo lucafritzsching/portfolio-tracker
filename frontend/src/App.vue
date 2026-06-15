@@ -11,6 +11,7 @@ import SavingsView from '@/views/SavingsView.vue'
 import NewsView from '@/views/NewsView.vue'
 import AnalysisView from '@/views/AnalysisView.vue'
 import ChatView from '@/views/ChatView.vue'
+import AltBView from '@/views/AltBView.vue'
 import ScreenerView from '@/views/ScreenerView.vue'
 import EvalView from '@/views/EvalView.vue'
 
@@ -36,6 +37,7 @@ onMounted(async () => {
       <NewsView v-else-if="ui.activeView === 'news'" />
       <AnalysisView v-else-if="ui.activeView === 'analysis'" />
       <ChatView v-else-if="ui.activeView === 'chat'" />
+      <AltBView v-else-if="ui.activeView === 'altb'" />
       <ScreenerView v-else-if="ui.activeView === 'screener'" />
       <EvalView v-else-if="ui.activeView === 'eval'" />
     </main>

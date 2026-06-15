@@ -7,6 +7,7 @@ from agent.orchestrator import (
     analyze_stock_stream, analyze_portfolio_stream,
     chat_stream, news_summary_stream, rebalance_stream,
 )
+from agent.nl_target_runner import nl_target_stream
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -92,6 +93,16 @@ async def chat(
     """GenAI: free-text Q&A about the portfolio, grounded in a live snapshot (SSE)."""
     prices = _parse_prices(current_prices)
     return _sse(lambda db: chat_stream(question, db, prices))
+
+
+@router.get("/nl-target")
+async def nl_target(
+    ticker: str = Query(..., description="Ticker-Symbol, z. B. AAPL"),
+    criterion: str = Query(..., description="Freitext-Kriterium, z. B. „hat aktuell eine Turnaround-Story“"),
+    mode: str = Query("fast", description="fast (1 LLM-Call) oder agentic (Tool-Loop)"),
+):
+    """Alt-B: judge a free-text criterion for one ticker from its recent news (SSE)."""
+    return _sse(lambda db: nl_target_stream(criterion, ticker.upper(), db, mode))
 
 
 @router.get("/news-summary/{ticker}")

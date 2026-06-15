@@ -1,0 +1,861 @@
+[
+ {
+  "id": "01",
+  "kat": "klar positiv",
+  "ticker": "BIOA",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Apr, BioAge)",
+  "mode": "fast",
+  "headlines": [
+   "BioAge Reports Positive Phase 1 Data for BGE-102 Showing Up To 86% hsCRP Reduction"
+  ],
+  "regex_strength": 3,
+  "llm_strength": 1,
+  "final": 2,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "BioAge Reports Positive Phase 1 Data for BGE-102 Showing Up To 86% hsCRP Reduction"
+  ],
+  "reason": "Die Schlagzeile berichtet über positive Phase-1-Daten, gibt aber keine Hinweise auf einen vorherigen Rückgang oder eine signifikante Veränderung der Unternehmensentwicklung.",
+  "exp_match": true,
+  "exp_note": "Regex st3 → Clamp 2-4; korrekter Katalysator → Match erwartet",
+  "correct": false,
+  "secs": 59.1
+ },
+ {
+  "id": "01",
+  "kat": "klar positiv",
+  "ticker": "BIOA",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Apr, BioAge)",
+  "mode": "agentic",
+  "headlines": [
+   "BioAge Reports Positive Phase 1 Data for BGE-102 Showing Up To 86% hsCRP Reduction"
+  ],
+  "regex_strength": 3,
+  "llm_strength": 1,
+  "final": 2,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "BioAge Reports Positive Phase 1 Data for BGE-102 Showing Up To 86% hsCRP Reduction"
+  ],
+  "reason": "Die Schlagzeile berichtet über positive Phase 1-Daten, jedoch gibt es keine Hinweise auf eine 'Turnaround-Story'.",
+  "exp_match": true,
+  "exp_note": "Regex st3 → Clamp 2-4; korrekter Katalysator → Match erwartet",
+  "correct": false,
+  "secs": 5.9
+ },
+ {
+  "id": "02",
+  "kat": "klar positiv",
+  "ticker": "CTMX",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, CytomX)",
+  "mode": "fast",
+  "headlines": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 2,
+  "final": 3,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "reason": "Die Schlagzeile beschreibt eine Ausweitung einer Zusammenarbeit, nicht jedoch einen klaren Wendepunkt nach einem vorherigen Rückgang oder eine umfassende Umkehrung der Geschäftsentwicklung.",
+  "exp_match": true,
+  "exp_note": "Regex st4 (Lizenzdeal) → Match erwartet",
+  "correct": false,
+  "secs": 38.8
+ },
+ {
+  "id": "02",
+  "kat": "klar positiv",
+  "ticker": "CTMX",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, CytomX)",
+  "mode": "agentic",
+  "headlines": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 4,
+  "final": 4,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "reason": "Die Schlagzeile deutet auf eine Partnerschaft hin, was als Teil einer Turnaround-Story interpretiert werden kann.",
+  "exp_match": true,
+  "exp_note": "Regex st4 (Lizenzdeal) → Match erwartet",
+  "correct": true,
+  "secs": 8.1
+ },
+ {
+  "id": "03",
+  "kat": "klar positiv",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "fast",
+  "headlines": [
+   "Acme Therapeutics Announces Positive Phase 3 Topline Results Meeting the Primary Endpoint"
+  ],
+  "regex_strength": 5,
+  "llm_strength": 3,
+  "final": 4,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "Acme Therapeutics Announces Positive Phase 3 Topline Results Meeting the Primary Endpoint"
+  ],
+  "reason": "Positive Phase 3 results suggest potential reversal of prior challenges, but context about prior downturns is missing.",
+  "exp_match": true,
+  "exp_note": "Regex st5 → Clamp 4-5 → Match erwartet",
+  "correct": true,
+  "secs": 41.6
+ },
+ {
+  "id": "03",
+  "kat": "klar positiv",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "agentic",
+  "headlines": [
+   "Acme Therapeutics Announces Positive Phase 3 Topline Results Meeting the Primary Endpoint"
+  ],
+  "regex_strength": 5,
+  "llm_strength": 5,
+  "final": 5,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "Acme Therapeutics Announces Positive Phase 3 Topline Results Meeting the Primary Endpoint"
+  ],
+  "reason": "Die Schlagzeile erwähnt positive Phase-3-Ergebnisse, was als ein Zeichen für eine Turnaround-Story interpretiert werden kann.",
+  "exp_match": true,
+  "exp_note": "Regex st5 → Clamp 4-5 → Match erwartet",
+  "correct": true,
+  "secs": 8.7
+ },
+ {
+  "id": "04",
+  "kat": "klar positiv",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "fast",
+  "headlines": [
+   "Beta Pharma Receives FDA Approval for Lead Drug in Rare Disease"
+  ],
+  "regex_strength": 5,
+  "llm_strength": 2,
+  "final": 4,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Beta Pharma Receives FDA Approval for Lead Drug in Rare Disease"
+  ],
+  "reason": "Eine FDA-Zulassung ist ein positives Ereignis, aber ein einzelner Erfolg reicht nicht aus, um eine 'Turnaround-Story' zu beweisen, die typischerweise umfassende Verbesserungen oder eine Wende in der Unternehmensentwicklung erfordert.",
+  "exp_match": true,
+  "exp_note": "Regex st5 (Zulassung) → Match erwartet",
+  "correct": false,
+  "secs": 43.8
+ },
+ {
+  "id": "04",
+  "kat": "klar positiv",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "agentic",
+  "headlines": [
+   "Beta Pharma Receives FDA Approval for Lead Drug in Rare Disease"
+  ],
+  "regex_strength": 5,
+  "llm_strength": 5,
+  "final": 5,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "Beta Pharma Receives FDA Approval for Lead Drug in Rare Disease"
+  ],
+  "reason": "Die Schlagzeile deutet auf eine positive Entwicklung hin, da die FDA-Zulassung für ein führendes Medikament in einer seltenen Krankheit als Erfolg gewertet wird, was eine Turnaround-Story unterstützen könnte.",
+  "exp_match": true,
+  "exp_note": "Regex st5 (Zulassung) → Match erwartet",
+  "correct": true,
+  "secs": 10.0
+ },
+ {
+  "id": "05",
+  "kat": "regex-grenze",
+  "ticker": "CABA",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Cabaletta)",
+  "mode": "fast",
+  "headlines": [
+   "Cabaletta Bio Announces New Positive Clinical Data Supporting Rese-Cel as Potential Treatment"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 3,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Cabaletta Bio Announces New Positive Clinical Data Supporting Rese-Cel as Potential Treatment"
+  ],
+  "reason": "Positive clinical data indicates potential progress, but a single update may not yet constitute a full turnaround.",
+  "exp_match": true,
+  "exp_note": "Ground truth positiv, ABER Regex st0 (kein Keyword) → Clamp 0-1 → erwartet FALSE-NEGATIV (Grenze)",
+  "correct": false,
+  "secs": 45.5
+ },
+ {
+  "id": "05",
+  "kat": "regex-grenze",
+  "ticker": "CABA",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Cabaletta)",
+  "mode": "agentic",
+  "headlines": [
+   "Cabaletta Bio Announces New Positive Clinical Data Supporting Rese-Cel as Potential Treatment"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Cabaletta Bio Announces New Positive Clinical Data Supporting Rese-Cel as Potential Treatment"
+  ],
+  "reason": "Die Schlagzeile erwähnt positive klinische Daten, die Rese-Cel als potenzielle Therapie unterstützen, jedoch gibt es keine klaren Hinweise auf eine 'Turnaround-Story'.",
+  "exp_match": true,
+  "exp_note": "Ground truth positiv, ABER Regex st0 (kein Keyword) → Clamp 0-1 → erwartet FALSE-NEGATIV (Grenze)",
+  "correct": false,
+  "secs": 9.4
+ },
+ {
+  "id": "06",
+  "kat": "konferenz",
+  "ticker": "ABCL",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, AbCellera)",
+  "mode": "fast",
+  "headlines": [
+   "AbCellera Biologics Presents at Jefferies Global Healthcare Conference 2026"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "AbCellera Biologics Presents at Jefferies Global Healthcare Conference 2026"
+  ],
+  "reason": "Die Schlagzeile beschreibt lediglich eine Präsentation auf einem Konferenz, ohne Hinweise auf eine Umkehrung der Geschäftsentwicklung oder signifikante Verbesserungen.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → Regex-Basis 0 → Clamp 0-1 → kein Match (Anti-Halluzination)",
+  "correct": true,
+  "secs": 31.8
+ },
+ {
+  "id": "06",
+  "kat": "konferenz",
+  "ticker": "ABCL",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, AbCellera)",
+  "mode": "agentic",
+  "headlines": [
+   "AbCellera Biologics Presents at Jefferies Global Healthcare Conference 2026"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "AbCellera Biologics Presents at Jefferies Global Healthcare Conference 2026"
+  ],
+  "reason": "Die Schlagzeile erwähnt lediglich, dass AbCellera Biologics an einer Konferenz teilnimmt, gibt aber keine Hinweise auf eine Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → Regex-Basis 0 → Clamp 0-1 → kein Match (Anti-Halluzination)",
+  "correct": true,
+  "secs": 6.4
+ },
+ {
+  "id": "07",
+  "kat": "konferenz",
+  "ticker": "ADPT",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Adaptive)",
+  "mode": "fast",
+  "headlines": [
+   "Adaptive Biotechnologies Presents at 46th Annual William Blair Growth Stock Conference"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Adaptive Biotechnologies Presents at 46th Annual William Blair Growth Stock Conference"
+  ],
+  "reason": "Die Schlagzeile erwähnt lediglich eine Präsentation auf einem Konferenz, was als Routine-Ereignis gilt und keine konkreten Hinweise auf eine Turnaround-Story liefert.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → kein Match",
+  "correct": true,
+  "secs": 32.5
+ },
+ {
+  "id": "07",
+  "kat": "konferenz",
+  "ticker": "ADPT",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Adaptive)",
+  "mode": "agentic",
+  "headlines": [
+   "Adaptive Biotechnologies Presents at 46th Annual William Blair Growth Stock Conference"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Adaptive Biotechnologies Presents at 46th Annual William Blair Growth Stock Conference"
+  ],
+  "reason": "Die Schlagzeile erwähnt lediglich, dass Adaptive Biotechnologies an einer Konferenz teilnimmt, gibt aber keine Hinweise auf eine Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → kein Match",
+  "correct": true,
+  "secs": 6.3
+ },
+ {
+  "id": "08",
+  "kat": "konferenz",
+  "ticker": "ASMB",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Assembly)",
+  "mode": "fast",
+  "headlines": [
+   "Assembly Biosciences Presents at Goldman Sachs 47th Annual Global Healthcare Conference"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Assembly Biosciences Presents at Goldman Sachs 47th Annual Global Healthcare Conference"
+  ],
+  "reason": "Die Schlagzeile beschreibt lediglich eine Präsentation auf einem Konferenz, ohne konkrete Hinweise auf eine Verbesserung der Geschäftsperformance oder einen strategischen Wandel, der eine 'Turnaround-Story' definieren würde.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → kein Match",
+  "correct": true,
+  "secs": 32.4
+ },
+ {
+  "id": "08",
+  "kat": "konferenz",
+  "ticker": "ASMB",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Assembly)",
+  "mode": "agentic",
+  "headlines": [
+   "Assembly Biosciences Presents at Goldman Sachs 47th Annual Global Healthcare Conference"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Assembly Biosciences Presents at Goldman Sachs 47th Annual Global Healthcare Conference"
+  ],
+  "reason": "Die Schlagzeile erwähnt lediglich, dass Assembly Biosciences an einer Konferenz teilnimmt, gibt aber keine Hinweise auf eine Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Konferenz st2 → kein Match",
+  "correct": true,
+  "secs": 6.5
+ },
+ {
+  "id": "09",
+  "kat": "analyst",
+  "ticker": "ALKS",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Alkermes)",
+  "mode": "fast",
+  "headlines": [
+   "RBC Capital Maintains Outperform on Alkermes, Raises Price Target to $56"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 2,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "RBC Capital Maintains Outperform on Alkermes, Raises Price Target to $56"
+  ],
+  "reason": "Die Schlagzeile erwähnt eine Preiserhöhung und eine Aufrechterhaltung der Empfehlung, aber keine konkreten Hinweise auf einen strukturellen oder finanziellen Umbruch der Gesellschaft, der typisch für eine Turnaround-Story wäre.",
+  "exp_match": false,
+  "exp_note": "Analyst-PT st2 → Regex-Basis 0 → kein Match",
+  "correct": true,
+  "secs": 37.7
+ },
+ {
+  "id": "09",
+  "kat": "analyst",
+  "ticker": "ALKS",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Alkermes)",
+  "mode": "agentic",
+  "headlines": [
+   "RBC Capital Maintains Outperform on Alkermes, Raises Price Target to $56"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "RBC Capital Maintains Outperform on Alkermes, Raises Price Target to $56"
+  ],
+  "reason": "Die Schlagzeile bespricht eine Preiszieländerung durch RBC Capital, jedoch keine klare Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Analyst-PT st2 → Regex-Basis 0 → kein Match",
+  "correct": true,
+  "secs": 5.9
+ },
+ {
+  "id": "10",
+  "kat": "analyst",
+  "ticker": "ABSI",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Absci)",
+  "mode": "fast",
+  "headlines": [
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "reason": "Die Schlagzeile erwähnt lediglich die Erstbewertung durch ein Analystenhaus mit 'Outperform', nicht jedoch konkrete Hinweise auf einen aktuellen Turnaround (z. B. Gewinnsteigerungen, Strukturreformen oder Wiederherstellung nach Verlusten).",
+  "exp_match": false,
+  "exp_note": "Analyst-Initiation → kein Match",
+  "correct": true,
+  "secs": 41.7
+ },
+ {
+  "id": "10",
+  "kat": "analyst",
+  "ticker": "ABSI",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Absci)",
+  "mode": "agentic",
+  "headlines": [
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "reason": "Die Schlagzeile bespricht die Einstufung einer Aktie durch ein Analystenhaus, jedoch gibt es keine Hinweise auf eine aktuelle Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Analyst-Initiation → kein Match",
+  "correct": true,
+  "secs": 6.4
+ },
+ {
+  "id": "11",
+  "kat": "analyst",
+  "ticker": "ARVN",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Arvinas)",
+  "mode": "fast",
+  "headlines": [
+   "Stephens & Co. Reiterates Overweight on Arvinas, Maintains $18 Price Target"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Stephens & Co. Reiterates Overweight on Arvinas, Maintains $18 Price Target"
+  ],
+  "reason": "Die Schlagzeile erwähnt keine konkreten Hinweise auf eine Umkehrung der Geschäftsentwicklung oder fundamentale Verbesserungen, sondern lediglich die Bestätigung einer bestehenden Einschätzung.",
+  "exp_match": false,
+  "exp_note": "Analyst-Reiterate st2 → kein Match",
+  "correct": true,
+  "secs": 41.5
+ },
+ {
+  "id": "11",
+  "kat": "analyst",
+  "ticker": "ARVN",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Arvinas)",
+  "mode": "agentic",
+  "headlines": [
+   "Stephens & Co. Reiterates Overweight on Arvinas, Maintains $18 Price Target"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Stephens & Co. Reiterates Overweight on Arvinas, Maintains $18 Price Target"
+  ],
+  "reason": "Die Schlagzeile bespricht eine Wiederholung einer bestehenden Einschätzung und nicht eine neue, aktuelle Turnaround-Story.",
+  "exp_match": false,
+  "exp_note": "Analyst-Reiterate st2 → kein Match",
+  "correct": true,
+  "secs": 6.1
+ },
+ {
+  "id": "12",
+  "kat": "negativ",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "fast",
+  "headlines": [
+   "Gamma Therapeutics Announces Phase 3 Trial Failed to Meet Primary Endpoint"
+  ],
+  "regex_strength": 0,
+  "llm_strength": null,
+  "final": 0,
+  "matches": false,
+  "source": "no_signal",
+  "evidence": [],
+  "reason": "Keine relevanten, nicht-negativen Schlagzeilen.",
+  "exp_match": false,
+  "exp_note": "negativ → Prefilter droppt → no_signal, kein LLM-Call",
+  "correct": true,
+  "secs": 0.0
+ },
+ {
+  "id": "12",
+  "kat": "negativ",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "agentic",
+  "headlines": [
+   "Gamma Therapeutics Announces Phase 3 Trial Failed to Meet Primary Endpoint"
+  ],
+  "regex_strength": 0,
+  "llm_strength": null,
+  "final": 0,
+  "matches": false,
+  "source": "no_signal",
+  "evidence": [],
+  "reason": "Keine relevanten, nicht-negativen Schlagzeilen.",
+  "exp_match": false,
+  "exp_note": "negativ → Prefilter droppt → no_signal, kein LLM-Call",
+  "correct": true,
+  "secs": 0.0
+ },
+ {
+  "id": "13",
+  "kat": "negativ",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "fast",
+  "headlines": [
+   "Delta Bio Halts Lead Program After FDA Places Clinical Hold"
+  ],
+  "regex_strength": 0,
+  "llm_strength": null,
+  "final": 0,
+  "matches": false,
+  "source": "no_signal",
+  "evidence": [],
+  "reason": "Keine relevanten, nicht-negativen Schlagzeilen.",
+  "exp_match": false,
+  "exp_note": "negativ → no_signal",
+  "correct": true,
+  "secs": 0.0
+ },
+ {
+  "id": "13",
+  "kat": "negativ",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert",
+  "mode": "agentic",
+  "headlines": [
+   "Delta Bio Halts Lead Program After FDA Places Clinical Hold"
+  ],
+  "regex_strength": 0,
+  "llm_strength": null,
+  "final": 0,
+  "matches": false,
+  "source": "no_signal",
+  "evidence": [],
+  "reason": "Keine relevanten, nicht-negativen Schlagzeilen.",
+  "exp_match": false,
+  "exp_note": "negativ → no_signal",
+  "correct": true,
+  "secs": 0.0
+ },
+ {
+  "id": "14",
+  "kat": "insider-only",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (Form-4-Stil)",
+  "mode": "fast",
+  "headlines": [
+   "Acme Therapeutics Director Reports Open-Market Purchase of 100,000 Shares (Form 4)"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Acme Therapeutics Director Reports Open-Market Purchase of 100,000 Shares (Form 4)"
+  ],
+  "reason": "Ein Einzelner Insider-Kauf signalisiert mögliche Zuversicht, reicht aber nicht aus, um eine 'Turnaround-Story' zu beweisen.",
+  "exp_match": false,
+  "exp_note": "Insider-Kauf ist kein News-Katalysator → Regex-Basis 0 → kein Match (Grenze des NL-Agenten)",
+  "correct": true,
+  "secs": 31.3
+ },
+ {
+  "id": "14",
+  "kat": "insider-only",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (Form-4-Stil)",
+  "mode": "agentic",
+  "headlines": [
+   "Acme Therapeutics Director Reports Open-Market Purchase of 100,000 Shares (Form 4)"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Acme Therapeutics Director Reports Open-Market Purchase of 100,000 Shares (Form 4)"
+  ],
+  "reason": "Die Schlagzeile berichtet über den Kauf von Aktien durch einen Direktor, was keine klare Turnaround-Story darstellt.",
+  "exp_match": false,
+  "exp_note": "Insider-Kauf ist kein News-Katalysator → Regex-Basis 0 → kein Match (Grenze des NL-Agenten)",
+  "correct": true,
+  "secs": 5.6
+ },
+ {
+  "id": "15",
+  "kat": "insider-only",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (Form-4-Stil)",
+  "mode": "fast",
+  "headlines": [
+   "Beta Bio CEO Buys $2 Million of Company Stock in Open-Market Transaction"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 3,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Beta Bio CEO Buys $2 Million of Company Stock in Open-Market Transaction"
+  ],
+  "reason": "CEO buying shares is a positive signal that may indicate confidence in the company's future, which could be part of a turnaround story.",
+  "exp_match": false,
+  "exp_note": "Insider-Kauf → kein News-Turnaround → kein Match",
+  "correct": true,
+  "secs": 53.0
+ },
+ {
+  "id": "15",
+  "kat": "insider-only",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (Form-4-Stil)",
+  "mode": "agentic",
+  "headlines": [
+   "Beta Bio CEO Buys $2 Million of Company Stock in Open-Market Transaction"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Beta Bio CEO Buys $2 Million of Company Stock in Open-Market Transaction"
+  ],
+  "reason": "Die Schlagzeile beschreibt den Kauf von Aktien durch den CEO, was nicht direkt auf eine Turnaround-Story hindeutet.",
+  "exp_match": false,
+  "exp_note": "Insider-Kauf → kein News-Turnaround → kein Match",
+  "correct": true,
+  "secs": 5.6
+ },
+ {
+  "id": "16",
+  "kat": "schwach-mix",
+  "ticker": "ABSI",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Absci, 2 Headlines)",
+  "mode": "fast",
+  "headlines": [
+   "Absci Corporation Presents at Jefferies Global Healthcare Conference 2026",
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 3,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [
+   "Absci Corporation Presents at Jefferies Global Healthcare Conference 2026",
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "reason": "Positive Analyst Coverage und Konferenzpräsenz deuten auf wachsendes Interesse und potenzielle Verbesserung hin.",
+  "exp_match": false,
+  "exp_note": "Konferenz + Analyst, beide st2 → Regex-Basis 0 → kein Match",
+  "correct": true,
+  "secs": 34.1
+ },
+ {
+  "id": "16",
+  "kat": "schwach-mix",
+  "ticker": "ABSI",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "real (Jun, Absci, 2 Headlines)",
+  "mode": "agentic",
+  "headlines": [
+   "Absci Corporation Presents at Jefferies Global Healthcare Conference 2026",
+   "Leerink Partners Initiates Coverage on Absci With Outperform Rating"
+  ],
+  "regex_strength": 0,
+  "llm_strength": 1,
+  "final": 1,
+  "matches": false,
+  "source": "llm",
+  "evidence": [],
+  "reason": "Die Schlagzeilen beziehen sich auf eine Konferenz und eine Rating-Einstufung, jedoch gibt es keine direkten Hinweise auf eine 'Turnaround-Story'.",
+  "exp_match": false,
+  "exp_note": "Konferenz + Analyst, beide st2 → Regex-Basis 0 → kein Match",
+  "correct": true,
+  "secs": 6.2
+ },
+ {
+  "id": "17",
+  "kat": "mix pos+neg",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (2 Headlines)",
+  "mode": "fast",
+  "headlines": [
+   "Epsilon Pharma Announces Positive Phase 2 Data in Lupus",
+   "Epsilon Pharma Faces Securities Class Action Lawsuit Over Disclosures"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 3,
+  "final": 3,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "Epsilon Pharma Announces Positive Phase 2 Data in Lupus"
+  ],
+  "reason": "Positive Phase 2 Daten können ein Zeichen für einen Wendepunkt in der Entwicklung eines Medikaments darstellen, sind jedoch noch nicht entscheidend für den Erfolg.",
+  "exp_match": true,
+  "exp_note": "Prefilter droppt das Negative, beurteilt das Positive (st4) → Match erwartet",
+  "correct": true,
+  "secs": 47.1
+ },
+ {
+  "id": "17",
+  "kat": "mix pos+neg",
+  "ticker": "—",
+  "krit": "aktuelle Turnaround-Story",
+  "herkunft": "konstruiert (2 Headlines)",
+  "mode": "agentic",
+  "headlines": [
+   "Epsilon Pharma Announces Positive Phase 2 Data in Lupus",
+   "Epsilon Pharma Faces Securities Class Action Lawsuit Over Disclosures"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 4,
+  "final": 4,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "Epsilon Pharma Announces Positive Phase 2 Data in Lupus"
+  ],
+  "reason": "Die Schlagzeile erwähnt positive Phase-2-Daten, was auf eine positive Entwicklung hinweist und somit eine Turnaround-Story nahelegt.",
+  "exp_match": true,
+  "exp_note": "Prefilter droppt das Negative, beurteilt das Positive (st4) → Match erwartet",
+  "correct": true,
+  "secs": 8.2
+ },
+ {
+  "id": "18",
+  "kat": "anderes Ziel",
+  "ticker": "CTMX",
+  "krit": "hat eine neue Partnerschaft oder einen Lizenzdeal abgeschlossen",
+  "herkunft": "real (Jun, CytomX)",
+  "mode": "fast",
+  "headlines": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 5,
+  "final": 5,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "reason": "Die Schlagzeile erwähnt direkt einen neuen Lizenzdeal mit Regeneron.",
+  "exp_match": true,
+  "exp_note": "Konfigurierbares Ziel (ADR-14): Kriterium=Partnerschaft, Lizenzdeal-Headline → Match",
+  "correct": true,
+  "secs": 892.1
+ },
+ {
+  "id": "18",
+  "kat": "anderes Ziel",
+  "ticker": "CTMX",
+  "krit": "hat eine neue Partnerschaft oder einen Lizenzdeal abgeschlossen",
+  "herkunft": "real (Jun, CytomX)",
+  "mode": "agentic",
+  "headlines": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "regex_strength": 4,
+  "llm_strength": 4,
+  "final": 4,
+  "matches": true,
+  "source": "llm",
+  "evidence": [
+   "CytomX Expands Collaboration and Licensing Agreement With Regeneron"
+  ],
+  "reason": "Die Schlagzeile erwähnt eine Erweiterung einer Partnerschaft und Lizenzvereinbarung mit Regeneron, was das Kriterium einer neuen Partnerschaft oder eines Lizenzdeals abgeschlossen direkt unterstützt.",
+  "exp_match": true,
+  "exp_note": "Konfigurierbares Ziel (ADR-14): Kriterium=Partnerschaft, Lizenzdeal-Headline → Match",
+  "correct": true,
+  "secs": 8.3
+ }
+]

@@ -26,8 +26,9 @@
         externe Datenquellen:  yfinance (Kurse/Fundamentaldaten)  ·  Finnhub (Quotes/News)
 ```
 
-Docker Compose startet **PostgreSQL + Ollama + Backend**. Das Frontend läuft per `npm run dev`
-(Vite). Details in [06-setup-und-betrieb.md](06-setup-und-betrieb.md).
+Docker Compose startet **PostgreSQL + (optional) Backend**; **Ollama läuft nativ auf dem Host**
+(Metal/GPU – ein Container wäre auf macOS CPU-only und zu langsam). Das Frontend läuft per
+`npm run dev` (Vite). Details in [06-setup-und-betrieb.md](06-setup-und-betrieb.md).
 
 ## Technologie-Stack & Begründung
 
@@ -85,7 +86,7 @@ portfolio-tracker/
 ├── backend/            FastAPI-App (siehe 04-backend.md)
 ├── frontend/           Vue-3-App (siehe 05-frontend.md)
 ├── docs/               diese Dokumentation
-├── docker-compose.yml  PostgreSQL + Ollama + Backend
+├── docker-compose.yml  PostgreSQL + (optional) Backend  (Ollama läuft nativ)
 ├── CLAUDE.md           maschinenlesbarer Einstieg für KI-Agenten
 └── index.html          Legacy-Prototyp (nur noch Referenz)
 ```
