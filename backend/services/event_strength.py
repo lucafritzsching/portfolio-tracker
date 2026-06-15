@@ -3,7 +3,7 @@
 Reine Funktionen, kein I/O. Ersetzt das brüchige Substring-Keyword-Matching durch:
   * Wortgrenzen-Regex  (kein "ind", das "binding" trifft)
   * Richtungs-/Negationserkennung  ("phase 3 failed" -> zählt nicht)
-  * konkrete Ereignistypen statt allgemeiner Positivität
+  * Quellen-Gating  (Firmen-PR-Wire = volle Stärke, Kommentar gedeckelt auf 2)
   * Turnaround-Setup aus Kursen  (ausgebombt + überverkauft)
 
 Die Rubrik (Typ -> Stärke 1..5) lebt hier *im Code* — die Skala bleibt menschlich
@@ -25,94 +25,60 @@ _NEGATIVE = re.compile(
     r"delay\w*|cut(?:s|ting)? guidance|lower\w* guidance"
     r")\b", re.I)
 
-# ── Stärke-Rubrik: (Stärke, Typ, Richtung, Muster). Höchste zuerst. ───────────
-_RULES: list[tuple[int, str, str, list[str]]] = [
-    (5, "FDA Approval", "positive", [
+# ── Stärke-Rubrik: (Stärke, Typ, Muster). Höchste zuerst, erster Treffer gewinnt. ──
+_RULES: list[tuple[int, str, list[str]]] = [
+    (5, "FDA-Zulassung / Phase-3-Erfolg", [
         r"\bfda approv\w*", r"\bapproved by the fda\b", r"\bmarketing authoriz\w*",
         r"\breceiv\w+ (?:fda )?approval\b", r"\bgrant\w+ approval\b",
+        r"\bphase 3\b.{0,45}\b(positive|met|success\w*|topline|primary endpoint)",
+        r"\bpivotal\b.{0,30}\b(positive|met|success)\b",
     ]),
-    (5, "Positive Phase-3 Daten", "positive", [
-        r"\bphase 3\b.{0,70}\b(positive|met|success\w*|topline|primary endpoint)",
-        r"\bpositive (?:top-?line|interim )?(?:phase ?3|pivotal)\b",
-        r"\bpositive\b.{0,60}\b(?:data|results?)\b.{0,40}\b(?:phase ?3|pivotal)\b",
-        r"\bpivotal\b.{0,45}\b(positive|met|success|data|results?)\b",
+    (4, "Positive Phase-2 / Partnerschaft / Beschleunigte Zulassung", [
+        r"\bphase 2\b", r"\bphase 1/2\b", r"\baccelerated approval\b",
+        r"\bbreakthrough therapy\b", r"\bfast track\b",
+        r"\b(partnership|collaborat\w+|licens\w+ agreement|strategic alliance|acqui\w+)\b",
+        r"\bpositive (?:top-?line|interim )?(?:phase ?[23]|pivotal)\b",
     ]),
-    (5, "Übernahme", "positive", [
-        r"\bto be acquired\b", r"\bacqui\w+ by\b", r"\bacquisition\b", r"\bmerger agreement\b",
-    ]),
-    (4, "FDA Fast Track / Breakthrough / Priority Review", "positive", [
-        r"\bfast track\b", r"\bbreakthrough therapy\b", r"\bpriority review\b",
-        r"\baccelerated approval\b", r"\borphan drug\b",
-    ]),
-    (4, "Positive Phase-2 Daten", "positive", [
-        r"\bphase 2\b.{0,70}\b(positive|met|success\w*|topline|primary endpoint)",
-        r"\bphase 1/2\b.{0,70}\b(positive|met|success\w*|topline)",
-        r"\bpositive (?:top-?line|interim )?(?:phase ?2|phase ?1/2)\b",
-        r"\bpositive\b.{0,60}\b(?:data|results?)\b.{0,40}\b(?:phase ?2|phase ?1/2)\b",
-    ]),
-    (4, "Meilensteinzahlung aus Kooperation", "positive", [
-        r"\bmilestone payment\b", r"\bmilestone\b.{0,35}\bpayment\b",
-        r"\b(?:earns|receives?|achieves?)\b.{0,45}\bmilestone\b",
-    ]),
-    (4, "Strategische Partnerschaft", "positive", [
-        r"\bstrategic (?:partnership|collaboration|alliance)\b",
-        r"\bcollaborat\w+ with\b", r"\bpartnership with\b",
-        r"\bglobal .{0,30}collaboration\b",
-    ]),
-    (4, "Lizenzdeal", "positive", [
-        r"\blicens\w+ (?:deal|agreement)\b", r"\bexclusive license\b",
-    ]),
-    (3, "Positive Phase-1 Daten", "positive", [
-        r"\bphase 1\b.{0,70}\b(positive|met|success\w*|topline)",
-        r"\bfirst-in-human\b.{0,70}\b(positive|data|results?)",
-        r"\bpositive (?:topline |interim )?phase ?1\b",
-        r"\bpositive\b.{0,60}\b(?:data|results?)\b.{0,40}\bphase ?1\b",
-    ]),
-    (3, "Operativer Fortschritt", "positive", [
-        r"\bind\b", r"\binvestigational new drug\b", r"\braise[sd]? guidance\b",
+    (3, "Phase-1-Erfolg / Guidance / Finanzierung / IND", [
+        r"\bphase 1\b", r"\bfirst-in-human\b", r"\bind\b",
+        r"\binvestigational new drug\b", r"\braise[sd]? guidance\b",
         r"\brestructur\w*", r"\bcash runway\b",
+        r"\b(?:secured|raise[sd]?|closing|priced)\b.{0,25}\b(financing|funding|offering|million)\b",
+        r"\bpositive (?:topline |interim )?(?:data|results?)\b",
     ]),
-    (3, "Kapitalerhöhung", "neutral", [
-        r"\b(?:secured|raise[sd]?|closing|priced)\b.{0,35}\b(financing|funding|offering|million)\b",
-        r"\bpublic offering\b", r"\bprivate placement\b", r"\bregistered direct\b",
-    ]),
-    (2, "Präsentation bestehender Daten", "neutral", [
+    (2, "Präsentation / Analyst / Routine-IR", [
         r"\bto present\b", r"\bpresent(?:s|ed|ation|ing)\b", r"\bposter\b",
-        r"\bconference\b", r"\bcomprehensive data\b", r"\binvestor (?:day|conference|update)\b",
+        r"\bconference\b", r"\banalyst\b", r"\bupgrade[sd]?\b", r"\bprice target\b",
+        r"\bcomprehensive data\b", r"\binvestor (?:day|conference|update)\b",
         r"\bhighlight\w*\b", r"\bnamed to\b", r"\bappoint\w+\b",
     ]),
-    (2, "Analystenmeinung", "neutral", [
-        r"\banalyst\b", r"\bupgrade[sd]?\b", r"\bdowngrade[sd]?\b", r"\bprice target\b",
-        r"\binitiates? coverage\b",
-    ]),
-    (1, "Marktkommentar", "neutral", [
-        r"\bwhy .{0,30}(?:stock|shares)\b", r"\bmarket commentary\b",
-        r"\bshares? (?:rise|fall|jump|drop)\b", r"\bis up\b", r"\bis down\b",
-        r"\bbullish\b", r"\bbearish\b",
-    ]),
-    (1, "Allgemein positive Berichterstattung", "positive", [
-        r"\blaunch\w*", r"\bnew product\b", r"\bexpand\w*", r"\bupside\b",
-        r"\boutlook\b", r"\bgrowth\b",
+    (1, "Allgemein positiv", [
+        r"\bmilestone\b", r"\blaunch\w*", r"\bnew product\b", r"\bexpand\w*",
+        r"\bupside\b", r"\boutlook\b", r"\bgrowth\b",
     ]),
 ]
 
-MIN_QUALIFYING_STRENGTH = 3
+_PR_WIRES = (
+    "globenewswire", "globe newswire", "businesswire", "business wire",
+    "pr newswire", "prnewswire", "accesswire", "access newswire", "newsfile",
+    "newswire", "company press release",
+)
+_COMMENTARY = (
+    "motley fool", "fool.com", "zacks", "seeking alpha", "seekingalpha",
+    "simply wall", "insider monkey", "marketbeat", "benzinga", "yahoo",
+    "investorplace", "tipranks", "thestreet", "the street", "barron",
+)
 
-# Öffentliche Rubrik: Typ -> (Stärke, Richtung). Das LLM darf den *Typ* bestimmen,
-# die Skala bleibt diese (deterministisch, testbar).
-EVENT_RUBRIC: dict[str, tuple[int, str]] = {
-    label: (strength, direction) for strength, label, direction, _ in _RULES
-}
-NO_CATALYST_TYPE = "Kein relevanter Katalysator"
+MIN_QUALIFYING_STRENGTH = 3
 
 
 @dataclass(frozen=True)
 class EventClassification:
     strength: int          # 0..5  (0 = negativ oder kein Katalysator)
     type: str
-    direction: str         # "positive" | "neutral" | "negative" | "none"
+    direction: str         # "positive" | "negative" | "none"
     capped_by_source: bool
-    qualifies: bool        # positives Event mit strength >= MIN_QUALIFYING_STRENGTH
+    qualifies: bool        # strength >= MIN_QUALIFYING_STRENGTH und positiv
 
 
 def classify_event(headline: str, summary: str = "", source: str | None = None) -> EventClassification:
@@ -123,28 +89,34 @@ def classify_event(headline: str, summary: str = "", source: str | None = None) 
 
     # Richtung zuerst: ein Rückschlag macht das Event negativ -> zählt nie.
     if _NEGATIVE.search(text):
-        return EventClassification(0, "Negative Studiendaten", "negative", False, False)
+        return EventClassification(0, "Negatives / Rückschlag-Signal", "negative", False, False)
 
     low = text.lower()
-    strength, etype, direction = 0, "Kein relevanter Katalysator", "none"
-    for s, label, event_direction, patterns in _RULES:
+    strength, etype = 0, "Kein Katalysator"
+    for s, label, patterns in _RULES:
         if any(re.search(p, low) for p in patterns):
-            strength, etype, direction = s, label, event_direction
+            strength, etype = s, label
             break
 
     if strength == 0:
         return EventClassification(0, etype, "none", False, False)
 
-    # Quelle wird nicht mehr als harter Deckel genutzt: konkrete klinische,
-    # regulatorische, Partnerschafts- oder Meilenstein-Events bleiben Events.
+    # Quellen-Gating: reine Kommentar-Quellen werden auf Stärke 2 gedeckelt
+    # (eine Firmen-PR über Phase-3-Daten wiegt mehr als ein Motley-Fool-Artikel,
+    #  und ein Kommentar-*Recap* eines alten Events soll kein frisches Signal sein).
     capped = False
+    src = (source or "").lower()
+    is_pr = any(w in src for w in _PR_WIRES)
+    is_commentary = any(c in src for c in _COMMENTARY)
+    if is_commentary and not is_pr and strength > 2:
+        strength, capped = 2, True
 
     return EventClassification(
         strength=strength,
         type=etype,
-        direction=direction,
+        direction="positive",
         capped_by_source=capped,
-        qualifies=direction == "positive" and strength >= MIN_QUALIFYING_STRENGTH,
+        qualifies=strength >= MIN_QUALIFYING_STRENGTH,
     )
 
 

@@ -126,35 +126,11 @@ damit wird „GenAI" ehrlich.
 SEC-8-K-Ereignis-Rückgrat, LLM-Stärke-Klassifikation und ein Backtest als Wirksamkeitsnachweis.
 Strategie-Code nur auf `feature/alt-b`.
 
-## ADR-14 – Alt-B Schicht 2: volles Universum, SEC-8-K-Rückgrat, LLM-Typ + Button-Scan mit Cache
-**Kontext:** Schicht 1 fand kaum Treffer (statisches 10-Ticker-Universum, harte Umsatz-Pflicht) und
-erkannte „Turnaround-Stories" nur per Regex auf einzelne, lückenhafte News-Headlines.
-**Entscheidung:**
-- **Dynamisches Universum:** Finnhub-Crawl (NASDAQ → Biotech → ≤ 15 Mrd., ~250 Ticker) in
-  `screener_universe` gecacht; Refresh manuell per Button (~50 min Free-Tier). Ohne Crawl Fallback
-  auf die kuratierte JSON — die App bleibt sofort benutzbar.
-- **EDGAR-Vorprüfung statt Finnhub-Breitenscan:** EIN `submissions`-Call je Ticker liefert 8-K
-  (Katalysator-Items 1.01/7.01/8.01) **und** Form 4 im 7-Tage-Fenster. Rate-limitierte
-  Finnhub-Calls (News/Insider) nur noch für diese Treffer → Scan in Minuten statt Stunden.
-- **LLM bestimmt Typ, Code setzt Skala** (löst das ADR-13-Versprechen ein): qwen3:14b klassifiziert
-  8-K-Pressetexte + relevante News auf einen Typ aus `EVENT_RUBRIC` plus deutsche Story; Stärke 0–5
-  kommt deterministisch aus der Rubrik. Guardrails: Typ muss in der Rubrik liegen, Beleg-Zitat muss
-  wörtlich im Quelltext stehen, jeder Fehler → Regex-Fallback (`event_llm.py`, unit-getestet).
-- **Button-Scan + SSE + DB-Cache:** `GET /screener/alt-b/scan` streamt Fortschritt, Ergebnis liegt
-  als JSON-Snapshot in `screener_runs`; `GET /alt-b/latest` lädt ihn sofort. Kein Live-GET mehr.
-- **Pre-Revenue-Fallback wiederhergestellt** (war zwischenzeitlich auf `> 0` verschärft): kein
-  Umsatz = zulässig ohne Bonuspunkte, nur schrumpfender Umsatz fällt raus.
-**Begründung:** Mehr ehrliche Treffer durch Breite (Universum, Pre-Revenue) statt durch laschere
-Kriterien; 8-K ist lückenlos und point-in-time; das LLM liefert die Story, halluziniert aber keine
-Stärke und keine Belege.
-**Konsequenz / Trade-off:** Scan dauert Minuten (bewusst: Button + Fortschritt statt Latenz-Lüge);
-Universum-Crawl bleibt manuell. Offen (Schicht 3): Backtest-Integration als Wirksamkeitsnachweis.
-
-## ADR-15 – Alt-B Schicht 3–4: hybrider NL-Ziel-Klassifikator + Trace + eigene UI-Sektion
+## ADR-14 – Alt-B Schicht 2–4: hybrider NL-Ziel-Klassifikator + Trace + eigene UI-Sektion
 **Kontext:** ADR-13 ließ bewusst offen, dass ein LLM später Bedeutung/Typ klassifizieren soll. Zudem
 stellte sich heraus: Forschungsgegenstand ist **nicht das Biotech-Screening**, sondern **wie gut ein
 lokales LLM Freitext in gute Outputs übersetzt** – der hartcodierte Biotech-Screener war nur eine
-Engpass-Vermeidung.
+Engpass-Vermeidung (und ist nicht einmal in `main.py` gemountet).
 **Entscheidung:**
 - **Konfigurierbares NL-Ziel** (`services/nl_target.py`): ein Freitext-*Kriterium* (NICHT auf „Turnaround"
   hartcodiert) wird gegen die News einer Aktie beurteilt. Pipeline: günstiger Regex-Prefilter
@@ -165,8 +141,8 @@ Engpass-Vermeidung.
 - **Zwei Modi:** `fast` (1 Aufruf) vs. `agentic` (kleiner, entkoppelter Tool-Loop mit `inspect_headline`,
   das die deterministische Klassifikation pro Schlagzeile offenlegt) – für den Achse-B-Vergleich.
 - **Decision-Trace** (`services/trace.py`) macht jeden Schritt nachvollziehbar (`duration_ms` lokalisiert
-  später den Compute-Engpass). **Eigene UI-Sektion „NL-Agent"** (`views/AltBView.vue` +
-  `GET /api/agent/nl-target`), getrennt vom KI-Chat-Bereich (Team Alt-A) und vom Alt-B-Scanner.
+  später den Compute-Engpass). **Eigene UI-Sektion „Alt B"** (`views/AltBView.vue` + `GET /api/agent/nl-target`),
+  getrennt vom KI-Chat-Bereich (Team Alt-A) – gespiegelt, plus Alt-B-Extras (Trace, fast/agentic).
 **Begründung:** Determinismus bleibt das Rückgrat (Gate/Stärke-Skala in Code); das LLM liefert NL-Urteil +
 Begründung, bounded gegen Halluzination – analog zum Evidence-/Faithfulness-Ansatz (ADR-11). „GenAI" wird
 ehrlich messbar: Regex-Basis vs. LLM-Rohstärke stehen im Trace.

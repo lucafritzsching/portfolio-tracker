@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type View = 'dashboard' | 'positions' | 'savings' | 'news' | 'analysis' | 'chat' | 'screener' | 'altb' | 'eval'
+export type View = 'dashboard' | 'positions' | 'savings' | 'news' | 'analysis' | 'chat' | 'altb' | 'eval'
 
 export const useUiStore = defineStore('ui', () => {
   const activeView = ref<View>('dashboard')

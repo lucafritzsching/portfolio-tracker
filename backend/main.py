@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
-from routers import portfolio, quotes, market_data, agent, screener
+from routers import portfolio, quotes, market_data, agent
 from routers import eval as eval_router
 
 
@@ -31,7 +31,6 @@ app.include_router(portfolio.router, prefix="/api")
 app.include_router(quotes.router, prefix="/api")
 app.include_router(market_data.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
-app.include_router(screener.router, prefix="/api")
 app.include_router(eval_router.router, prefix="/api")
 
 

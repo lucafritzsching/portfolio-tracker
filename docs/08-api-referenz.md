@@ -71,20 +71,6 @@ Jede Nachricht ist eine Zeile `data: <text>\n\n`. Zeilenumbrüche im Inhalt sind
 > öffnen ihre DB-Session im Stream-Generator. Siehe ADR-04 in
 > [07-entscheidungslog.md](07-entscheidungslog.md).
 
-## Screener (`/api/screener`) — Alt-B Schicht 2 (nur `feature/alt-b`)
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| GET | `/alt-b/latest` | Letzter persistierter Scan (`screener_runs`), sofort verfügbar. Leere Antwort (`created_at: null`), wenn noch nie gescannt |
-| GET | `/alt-b/scan?limit=12&min_score=0` | **SSE**: gestufter Scan (Fundamentals → EDGAR-Vorprüfung → Detail + LLM). Fortschritts-Events `{stage, i, n, ticker}`, dann `{result: <ScreenerResponse>}`; Ergebnis wird in der DB gecacht |
-| GET | `/universe` | Universum-Status: `{count, updated_at, source: "live"\|"kuratiert"}` |
-| GET | `/universe/refresh?limit=` | **SSE**: NASDAQ-Biotech-Universum neu crawlen (Finnhub, ~50 min Free-Tier). `limit` begrenzt die geprüften Symbole (Demo) |
-
-Scan-Funnel: Universum (gecrawlt oder kuratierte JSON) → Market Cap ≤ 15 Mrd. → Umsatz ok
-(inkl. Pre-Revenue) → EDGAR-Vorprüfung (8-K-Katalysator/Form 4, 7 Tage, EIN submissions-Call) →
-Detail (Finnhub-News/-Insider, 8-K-Pressetexte) + LLM-Klassifikation (Typ vom LLM, Stärke aus der
-Rubrik, Beleg-Zitat-Pflicht; Regex-Fallback ohne Ollama) → Score ≥ `min_score`.
-
 ## CORS
 
 `main.py` erlaubt Origins `http://localhost:5173`, `:3000`, `:8080` (Vite-Dev-Server). Bei anderen
