@@ -10,6 +10,7 @@ const navItems: { id: View; label: string; icon: string }[] = [
   { id: 'analysis', label: 'KI-Analyse', icon: '🤖' },
   { id: 'chat', label: 'KI-Chat', icon: '💬' },
   { id: 'altb', label: 'Alt B', icon: '✨' },
+  { id: 'vergleich', label: 'Vergleich', icon: '⚖️' },
   { id: 'eval', label: 'Eval', icon: '🧪' },
 ]
 
