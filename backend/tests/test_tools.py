@@ -127,3 +127,31 @@ def test_judge_news_shape(monkeypatch):
     assert out["ticker"] == "AAPL" and out["matches"] is True and out["significance"] == 4
     assert out["trace"]["llm_strength"] == 5 and out["trace"]["final"] == 4
     assert out["trace"]["n_evidence_cited"] == 1 and out["trace"]["source"] == "llm"
+
+
+def test_get_news_drops_off_topic_headlines(monkeypatch):
+    """Finnhub's company-news feed can include market-wide/off-topic articles under a ticker
+    (Uniswap/Roku under AAPL); _get_news keeps only headlines that mention the company."""
+    import datetime as _dt
+
+    class _N:
+        def __init__(self, headline, sentiment=0.0):
+            self.headline, self.summary, self.sentiment = headline, "", sentiment
+            self.published_at = _dt.datetime(2026, 6, 15)
+
+    async def fake_news(ticker, db, days=7):
+        return [
+            _N("Rising Memory Costs Test Apple Margins", 0.25),
+            _N("Standard Chartered Says UNI Could Hit $100"),
+            _N("With Roku Stock Near Highs, Is It Worth It?"),
+        ]
+
+    async def fake_name(self, ticker):
+        return "Apple Inc."
+
+    monkeypatch.setattr("agent.tools.fetch_and_store_news", fake_news)
+    monkeypatch.setattr(ToolExecutor, "_company_name", fake_name)
+    out = json.loads(_run(_ex().execute("get_news", {"ticker": "AAPL"})))
+    heads = [a["headline"] for a in out.get("articles", [])]
+    assert out["article_count"] == 1 and any("Apple" in h for h in heads)
+    assert all("Roku" not in h and "UNI" not in h for h in heads)

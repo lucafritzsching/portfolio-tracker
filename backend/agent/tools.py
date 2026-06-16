@@ -24,6 +24,7 @@ from services.finder import (
     DEFAULT_MAX_CANDIDATES, load_fallback_universe, parse_mandate, run_screen,
 )
 from services.nl_target import NLItem, evaluate_nl_target
+from services.event_strength import is_relevant
 
 logger = logging.getLogger("agent")
 
@@ -261,21 +262,25 @@ class ToolExecutor:
 
     async def _get_news(self, ticker: str, days: int = 7) -> str:
         ticker = ticker.upper()
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        result = await self.db.execute(
-            select(NewsCache)
-            .where(NewsCache.ticker == ticker, NewsCache.published_at >= cutoff)
-            .order_by(NewsCache.published_at.desc())
-            .limit(10)
-        )
-        news = result.scalars().all()
-        if not news:
-            return json.dumps({"ticker": ticker, "news": [], "message": "Keine gecachten News. Bitte zuerst /market-data/news/{ticker} aufrufen."})
+        news = await fetch_and_store_news(ticker, self.db, days=days)
+        # Relevance filter: Finnhub's company-news feed can include market-wide / multi-tagged articles
+        # (e.g. Uniswap/Roku stories under "AAPL"). Keep only headlines that actually mention the company —
+        # the same guard judge_news uses — so the agent never reasons over off-topic noise.
+        name = await self._company_name(ticker)
+        relevant = [
+            n for n in news
+            if is_relevant(f"{n.headline or ''} {n.summary or ''}", "", ticker, name)
+        ]
+        if not relevant:
+            return json.dumps({
+                "ticker": ticker, "article_count": 0,
+                "message": "Keine unternehmensspezifischen Nachrichten in diesem Zeitraum gefunden.",
+            }, ensure_ascii=False)
 
-        avg_sentiment = sum(float(n.sentiment or 0) for n in news) / len(news)
+        avg_sentiment = sum(float(n.sentiment or 0) for n in relevant) / len(relevant)
         return json.dumps({
             "ticker": ticker,
-            "article_count": len(news),
+            "article_count": len(relevant),
             "avg_sentiment": round(avg_sentiment, 3),
             "sentiment_label": "positiv" if avg_sentiment > 0.1 else ("negativ" if avg_sentiment < -0.1 else "neutral"),
             "articles": [
@@ -285,9 +290,9 @@ class ToolExecutor:
                     "published": n.published_at.strftime("%Y-%m-%d"),
                     "sentiment": float(n.sentiment) if n.sentiment else None,
                 }
-                for n in news[:5]
+                for n in relevant[:5]
             ],
-        })
+        }, ensure_ascii=False)
 
     async def _run_statistical_model(self, ticker: str) -> str:
         ticker = ticker.upper()
