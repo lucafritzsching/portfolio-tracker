@@ -63,6 +63,12 @@ Bewusst variiert wird **nur der Ziel-Typ** — und damit, **wo** das LLM sitzt (
 - `think:false`-Fix evaluieren (Re-Run) → fast-Genauigkeit + Latenz quantifizieren.
 - Decision-Trace tiefer in den NL-Agent ziehen; Regex-vs-LLM-Divergenz als explizite Metrik.
 - Weitere NL-Quellen (Reddit) hinter `NLItem`; Multi-Agent (Achse C) als dokumentierte Zukunft.
+- **Ticker-freie News-Discovery** („welche Firmen hatten zuletzt besonders gute Reports/News?", ohne
+  Ticker im Prompt): `is_relevant` kann *nicht* rückwärts entdecken (es braucht immer einen Kandidaten),
+  und Finnhubs allgemeiner Feed liefert keine `related`-Ticker. Geplanter Weg: eine **deterministische
+  Mover-Quelle** (yfinance Tagesgewinner/Most-Active) als Kandidaten → bestehendes **`judge_news`** je
+  Kandidat (beleggebunden) → rangierte Liste mit %-Bewegung + zitierter Schlagzeile. Bewusst **nach** der
+  Demo (neue Funktionalität = Demo-Risiko).
 
 ## Demo-Ablauf (Vorschlag für die Präsentation)
 > **Aktualisiert (Refactor, ADR-16/17):** Es gibt nur noch **ein Chat-Fenster (KI-Agent)**, das je nach
