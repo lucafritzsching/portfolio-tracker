@@ -15,6 +15,8 @@ const answer = ref('')
 const running = ref(false)
 const history = ref<{ q: string; a: string }[]>([])
 const lastQuestion = ref('')
+const lastTrace = ref<{ question?: string; trace?: { step: number; tool: string; args: any; result: string }[] } | null>(null)
+const TRACE_MARKER = '␞TRACE␞'   // backend marks the structured trace event with this sentinel
 
 // ── Setup / Agent status (moved here from the old analysis view) ──────────────
 const agentStatus = ref<AgentStatus | null>(null)
@@ -79,16 +81,27 @@ function buildHistory(): { role: string; content: string }[] {
   return msgs
 }
 
-// Export exactly what the agent did (question + full answer incl. visible 🔧 tool-trace) as a .txt.
+// Export exactly what the agent did: question + every tool call WITH its result/calculations + the
+// final answer. The detailed steps come from the backend trace (not just the visible 🔧 headers).
 function exportLog() {
   const q = lastQuestion.value || history.value[0]?.q || ''
   const a = answer.value || history.value[0]?.a || ''
-  if (!a) return
+  if (!a && !lastTrace.value) return
+  const lines: string[] = ['PortfAIo — KI-Agent Log', 'Zeit: ' + new Date().toLocaleString('de-DE'), '', 'FRAGE:', q, '']
+  const steps = lastTrace.value?.trace ?? []
+  if (steps.length) {
+    lines.push('=== AGENT-SCHRITTE (Tool-Aufrufe + Ergebnisse) ===')
+    for (const s of steps) {
+      lines.push(`Schritt ${s.step}: ${s.tool}(${JSON.stringify(s.args)})`)
+      lines.push('  → Ergebnis: ' + s.result)
+      lines.push('')
+    }
+  } else {
+    lines.push('(Keine Tool-Aufrufe — der Agent hat direkt geantwortet.)', '')
+  }
+  lines.push('=== FINALE ANTWORT ===', a)
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const text =
-    `PortfAIo — KI-Agent Log\nZeit: ${new Date().toLocaleString('de-DE')}\n\n` +
-    `Frage:\n${q}\n\nAntwort (inkl. sichtbarer Tool-Trace):\n${a}\n`
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -102,6 +115,7 @@ function ask() {
   if (!q || running.value) return
   running.value = true
   answer.value = ''
+  lastTrace.value = null
   lastQuestion.value = q
   const source = api.agent.ask(q, portfolio.currentPrices, buildHistory())
   source.onmessage = (e) => {
@@ -110,6 +124,10 @@ function ask() {
       source.close()
       if (answer.value) history.value.unshift({ q, a: answer.value })
       question.value = ''
+      return
+    }
+    if (e.data.startsWith(TRACE_MARKER)) {
+      try { lastTrace.value = JSON.parse(e.data.slice(TRACE_MARKER.length)) } catch { /* ignore */ }
       return
     }
     answer.value += e.data.replace(/\\n/g, '\n')
@@ -177,6 +195,14 @@ function ask() {
       <button class="btn btn-sm" @click="exportLog" title="Frage + Antwort + Tool-Trace als .txt speichern">⬇ Log exportieren</button>
     </div>
     <div v-if="answer" class="card ai-box markdown" v-html="md.render(answer)"></div>
+
+    <details v-if="lastTrace?.trace?.length && !running" class="card" style="margin-top: 10px">
+      <summary style="cursor: pointer; font-weight: 600; font-size: 13px">🔍 Agent-Trace ({{ lastTrace.trace.length }} Tool-Aufruf(e) + Ergebnisse)</summary>
+      <div v-for="(s, i) in lastTrace.trace" :key="i" style="margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px">
+        <div style="font-size: 12px"><strong>Schritt {{ s.step }}: {{ s.tool }}</strong> ({{ JSON.stringify(s.args) }})</div>
+        <pre style="white-space: pre-wrap; word-break: break-word; font-size: 11px; color: var(--text-secondary); margin: 4px 0 0; max-height: 220px; overflow-y: auto">{{ s.result }}</pre>
+      </div>
+    </details>
     <div v-else-if="running" class="card ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
       <span class="spinner" /> Agent wählt Werkzeuge und sammelt Daten…
     </div>

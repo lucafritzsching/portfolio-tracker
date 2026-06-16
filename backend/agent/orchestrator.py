@@ -161,6 +161,7 @@ async def _run_agent_loop(
     show_tools: bool = True,
     stream_final: bool = True,
     temperature: float = 0.3,
+    trace: list | None = None,
 ) -> AsyncGenerator[str, None]:
     """Tool-use loop: the LLM may call tools; the final answer is streamed or returned as one block."""
     iteration = 0
@@ -213,6 +214,9 @@ async def _run_agent_loop(
             if show_tools:
                 yield f"\n\n> 🔧 Führe Tool aus: **{tool_name}**({_fmt_args(arguments)})…\n"
             tool_result = await executor.execute(tool_name, arguments)
+            if trace is not None:
+                trace.append({"step": iteration, "tool": tool_name, "args": arguments,
+                              "result": tool_result[:2500]})
             messages.append({"role": "tool", "content": tool_result})
 
     messages.append({"role": "user", "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung."})
@@ -361,8 +365,12 @@ async def ask_stream(
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": question})
     executor = ToolExecutor(db=db, current_prices=current_prices or {})
-    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0):
+    trace: list = []
+    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0, trace=trace):
         yield chunk
+    # Final structured trace (tool calls + results) — the frontend captures it for the exportable log
+    # and a collapsible trace view; it is NOT rendered into the visible answer.
+    yield "␞TRACE␞" + json.dumps({"question": question, "trace": trace}, ensure_ascii=False, default=str)
 
 
 async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[str, None]:
