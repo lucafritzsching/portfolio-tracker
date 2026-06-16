@@ -106,8 +106,12 @@ function exportLog() {
   const link = document.createElement('a')
   link.href = url
   link.download = `agent-log-${ts}.txt`
+  // Robust download: the link must be in the DOM, and the object URL must NOT be revoked
+  // synchronously after click() (that cancels the download in several browsers).
+  document.body.appendChild(link)
   link.click()
-  URL.revokeObjectURL(url)
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
 
 function ask() {
@@ -191,8 +195,8 @@ function ask() {
       </div>
     </div>
 
-    <div v-if="answer && !running" style="display: flex; justify-content: flex-end; margin-bottom: 8px">
-      <button class="btn btn-sm" @click="exportLog" title="Frage + Antwort + Tool-Trace als .txt speichern">⬇ Log exportieren</button>
+    <div v-if="(answer || lastTrace?.trace?.length) && !running" style="display: flex; justify-content: flex-end; margin-bottom: 8px">
+      <button class="btn btn-sm" @click="exportLog" title="Frage + Tool-Aufrufe + Ergebnisse + Antwort als .txt">⬇ Log (.txt) exportieren</button>
     </div>
     <div v-if="answer" class="card ai-box markdown" v-html="md.render(answer)"></div>
 

@@ -209,4 +209,7 @@ Vorgehen:
    (Prognosen sind Wahrscheinlichkeiten, keine Gewissheit). Nenne keine internen Feldnamen.
 4. Vermeide Hinhalte-Sätze wie „man könnte weitere Tools nutzen": Entweder du nutzt das Tool, oder du
    benennst die konkrete Grenze (z. B. „Umsatzwachstum nicht geprüft"). Schließe mit einer konkreten,
-   rangierten Auswahl/Empfehlung ab — nicht mit einer Aufgabenbeschreibung."""
+   rangierten Auswahl/Empfehlung ab — nicht mit einer Aufgabenbeschreibung.
+5. Halte die Antwort KOMPAKT: keine Floskeln oder Wiederholungen („guter Kandidat für Investitionen");
+   pro Kandidat EINE knappe Zeile mit den echten Zahlen bzw. dem zitierten Beleg, dann eine kurze
+   Schlussfolgerung. Das ist schneller generiert UND klarer."""
