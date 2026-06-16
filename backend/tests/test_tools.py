@@ -40,18 +40,42 @@ def test_execute_catches_handler_exception(monkeypatch):
 
 def test_screen_by_strategy_shape(monkeypatch):
     async def fake_parse(mandate):
-        return ParsedMandate(filters={"exchanges": ["NMS"]}, nl_criterion="Turnaround", parsed_ok=True)
+        return ParsedMandate(filters={"exchanges": ["NMS"], "min_revenue_growth": 15},
+                             nl_criterion="Turnaround", parsed_ok=True)
 
     async def fake_screen(filters):
         return ([ScreenCandidate("CRSP", "CRISPR", market_cap=5e9)], "yfinance_screen")
 
+    async def fake_enrich(self, ticker):
+        return (5e9, 0.30, 25.0, "CRISPR Therapeutics")   # mcap, revenueGrowth(frac), pe, name
+
     monkeypatch.setattr("agent.tools.parse_mandate", fake_parse)
     monkeypatch.setattr("agent.tools.run_screen", fake_screen)
-    out = json.loads(_run(_ex().execute("screen_by_strategy", {"mandate": "Nasdaq Biotech ..."})))
-    assert out["source"] == "yfinance_screen"
-    assert out["nl_criterion"] == "Turnaround"
-    assert out["candidates"][0]["ticker"] == "CRSP"
-    assert out["candidates"][0]["market_cap_bn"] == 5.0
+    monkeypatch.setattr(ToolExecutor, "_enrich", fake_enrich)
+    out = json.loads(_run(_ex().execute("screen_by_strategy", {"mandate": "Nasdaq Biotech >15%"})))
+    assert out["source"] == "yfinance_screen" and out["nl_criterion"] == "Turnaround"
+    c = out["candidates"][0]
+    assert c["ticker"] == "CRSP" and c["market_cap_bn"] == 5.0 and c["revenue_growth_pct"] == 30.0
+
+
+def test_screen_refilters_on_real_revenue_growth(monkeypatch):
+    """The enriched annual growth is re-checked against the mandate, so a candidate the live screen
+    returned but which actually misses the threshold is dropped — visible + traceable."""
+    async def fake_parse(mandate):
+        return ParsedMandate(filters={"min_revenue_growth": 15}, nl_criterion="x", parsed_ok=True)
+
+    async def fake_screen(filters):
+        return ([ScreenCandidate("HI", "High"), ScreenCandidate("LO", "Low")], "yfinance_screen")
+
+    async def fake_enrich(self, ticker):
+        return (2e9, (0.40 if ticker == "HI" else 0.05), None, ticker)   # HI 40% vs LO 5%
+
+    monkeypatch.setattr("agent.tools.parse_mandate", fake_parse)
+    monkeypatch.setattr("agent.tools.run_screen", fake_screen)
+    monkeypatch.setattr(ToolExecutor, "_enrich", fake_enrich)
+    out = json.loads(_run(_ex().execute("screen_by_strategy", {"mandate": "x"})))
+    tickers = [c["ticker"] for c in out["candidates"]]
+    assert "HI" in tickers and "LO" not in tickers
 
 
 def test_screen_falls_back_when_empty(monkeypatch):
@@ -61,10 +85,14 @@ def test_screen_falls_back_when_empty(monkeypatch):
     async def empty_screen(filters):
         return ([], "error")
 
+    async def fake_enrich(self, ticker):
+        return (1e9, 0.20, None, ticker)
+
     monkeypatch.setattr("agent.tools.parse_mandate", fake_parse)
     monkeypatch.setattr("agent.tools.run_screen", empty_screen)
+    monkeypatch.setattr(ToolExecutor, "_enrich", fake_enrich)
     out = json.loads(_run(_ex().execute("screen_by_strategy", {"mandate": "x"})))
-    assert out["source"] == "fallback_universe" and out["candidate_count"] >= 1
+    assert out["source"] == "fallback_universe" and out["match_count"] >= 1
 
 
 def test_judge_news_no_news(monkeypatch):

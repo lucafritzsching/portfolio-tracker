@@ -27,6 +27,13 @@ from services.nl_target import NLItem, evaluate_nl_target
 
 logger = logging.getLogger("agent")
 
+
+def _to_f(x):
+    try:
+        return None if x is None else float(x)
+    except (TypeError, ValueError):
+        return None
+
 # ── Tool schemas for Ollama (OpenAI-compatible format) ───────────────────────
 
 TOOL_DEFINITIONS = [
@@ -165,6 +172,7 @@ class ToolExecutor:
         self.current_prices = current_prices or {}
         self._price_cache: dict[str, list[dict]] = {}
         self._name_cache: dict[str, str] = {}
+        self._fund_cache: dict[str, tuple] = {}
 
     async def execute(self, tool_name: str, arguments: dict) -> str:
         handlers = {
@@ -364,28 +372,64 @@ class ToolExecutor:
             "note": pos.note,
         })
 
+    async def _enrich(self, ticker: str) -> tuple:
+        """Echte Fundamentaldaten je Kandidat (Market Cap, Umsatzwachstum, KGV, Name) — gecacht pro Lauf."""
+        if ticker in self._fund_cache:
+            return self._fund_cache[ticker]
+        try:
+            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
+            out = (_to_f(info.get("marketCap")), _to_f(info.get("revenueGrowth")),
+                   _to_f(info.get("trailingPE")), info.get("shortName") or info.get("longName") or ticker)
+        except Exception:
+            out = (None, None, None, ticker)
+        self._fund_cache[ticker] = out
+        return out
+
     async def _screen_by_strategy(self, mandate: str) -> str:
-        """Strategie-Vorfilter: Mandat → harte Filter → yfinance-Screen (Fallback-Universum)."""
+        """Strategie-Finder in EINEM Schritt: Mandat → deterministischer Screen → Fundamentaldaten
+        (parallel) → Re-Filter auf echten Werten (Market Cap + Umsatzwachstum) → rangierte Liste.
+
+        Bewusst KEINE Pro-Kandidat-LLM-Verkettung: die teuren Werte kommen aus yfinance (~Sekunden,
+        parallel), nicht aus N tool-bestückten 14B-Aufrufen. Market Cap und Umsatzwachstum stehen mit
+        echten Zahlen im Ergebnis, sodass der Filter nachvollziehbar/überprüfbar ist.
+        """
         parsed = await parse_mandate(mandate)
         candidates, source = await run_screen(parsed.filters)
         if not candidates:
             candidates = load_fallback_universe()
             source = "fallback_universe"
-        top = candidates[:DEFAULT_MAX_CANDIDATES]
+
+        f = parsed.filters
+        max_mc, min_mc, min_growth = f.get("max_market_cap"), f.get("min_market_cap"), f.get("min_revenue_growth")
+        pool = candidates[:12]
+        enriched = await asyncio.gather(*[self._enrich(c.ticker) for c in pool])
+
+        rows = []
+        for c, (mc, rg, pe, name) in zip(pool, enriched):
+            mc = mc if mc is not None else c.market_cap
+            if max_mc and mc and mc > max_mc:
+                continue
+            if min_mc and mc and mc < min_mc:
+                continue
+            if min_growth is not None and rg is not None and rg * 100 < min_growth:
+                continue  # Umsatzwachstum „im letzten Jahr" gegen echten Wert geprüft
+            rows.append({
+                "ticker": c.ticker,
+                "name": name or c.name,
+                "market_cap_bn": round(mc / 1e9, 2) if mc else None,
+                "revenue_growth_pct": round(rg * 100, 1) if rg is not None else None,
+                "pe": round(pe, 1) if pe else None,
+            })
+        rows.sort(key=lambda r: (r["market_cap_bn"] or 0), reverse=True)
+
         return json.dumps({
             "mandate": mandate,
-            "parsed_filters": parsed.filters,
+            "parsed_filters": f,
             "nl_criterion": parsed.nl_criterion,
             "source": source,
-            "candidate_count": len(candidates),
-            "candidates": [
-                {
-                    "ticker": c.ticker,
-                    "name": c.name,
-                    "market_cap_bn": round(c.market_cap / 1e9, 2) if c.market_cap else None,
-                }
-                for c in top
-            ],
+            "match_count": len(rows),
+            "candidates": rows[:DEFAULT_MAX_CANDIDATES],
+            "hinweis": "market_cap_bn und revenue_growth_pct sind echte Fundamentaldaten, nach dem Screen erneut geprüft.",
         }, ensure_ascii=False)
 
     async def _company_name(self, ticker: str) -> str:

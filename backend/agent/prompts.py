@@ -195,7 +195,9 @@ Vorgehen:
    Screen NICHT ab: liefere eine konkrete, rangierte Auswahl der besten Kandidaten. Nennt der Nutzer
    eine News-/Aktualitäts-Bedingung (z. B. „gute News der letzten Tage"), prüfe die Top-Kandidaten
    mit judge_news; nennt er eine Kennzahl-Bedingung (z. B. Umsatzwachstum), prüfe sie mit
-   get_fundamentals, statt sie nur zu behaupten.
+   get_fundamentals, statt sie nur zu behaupten. Hinweis: screen_by_strategy liefert Market Cap UND
+   Umsatzwachstum je Kandidat bereits geprüft mit — nutze diese Werte direkt und rufe dafür NICHT
+   zusätzlich get_fundamentals auf (das spart Zeit).
 2. Stütze JEDE Zahl auf Tool-Ergebnisse — erfinde nichts. Liefert ein Tool einen Fehler/keine Daten,
    sage das ehrlich, statt zu raten.
 3. Antworte auf Deutsch und ERKLÄRE nachvollziehbar: (a) wie du die Anfrage verstanden hast,

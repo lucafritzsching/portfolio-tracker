@@ -102,11 +102,18 @@ async def chat(
 async def ask(
     question: str = Query(..., description="Freitext-Anfrage an den Analyse-Agenten"),
     current_prices: str = Query("", description="JSON: {'AAPL': 185.0, ...}"),
+    history: str = Query("", description="JSON-Liste vorheriger Turns: [{role, content}, ...] (Gedächtnis)"),
 ):
-    """Unified routing agent: one free-text question → the LLM routes to the right tool
-    (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE)."""
+    """Unified routing agent: one free-text question (+ optional conversation history) → the LLM routes
+    to the right tool (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation."""
     prices = _parse_prices(current_prices)
-    return _sse(lambda db: ask_stream(question, db, prices))
+    try:
+        hist = json.loads(history) if history else []
+    except json.JSONDecodeError:
+        hist = []
+    if not isinstance(hist, list):
+        hist = []
+    return _sse(lambda db: ask_stream(question, db, prices, hist))
 
 
 @router.get("/news-summary/{ticker}")

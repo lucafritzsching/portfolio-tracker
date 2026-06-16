@@ -81,9 +81,16 @@ export const api = {
 
     // Unified routing agent: one free-text question → the LLM routes to the right tool
     // (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE).
-    ask: (question: string, currentPrices: Record<string, number>): EventSource => {
+    ask: (
+      question: string,
+      currentPrices: Record<string, number>,
+      history: { role: string; content: string }[] = [],
+    ): EventSource => {
       const p = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/ask?question=${encodeURIComponent(question)}&current_prices=${p}`)
+      const h = encodeURIComponent(JSON.stringify(history))
+      return new EventSource(
+        `${BASE}/agent/ask?question=${encodeURIComponent(question)}&current_prices=${p}&history=${h}`,
+      )
     },
   },
 

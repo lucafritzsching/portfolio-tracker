@@ -15,8 +15,8 @@ The LLM only **parses** the mandate (the parse is surfaced in the trace, so it s
 MacBook-friendly: the screen is one call and only the top-N survivors ever reach the LLM. If the live
 screen is unavailable, the finder falls back to a small curated universe so a demo never goes dark.
 
-This module owns the *pieces* (parse, query, screen, fallback, ranking); the SSE orchestration +
-news/DB I/O lives in ``agent.finder_runner`` — mirroring the ``nl_target`` / ``nl_target_runner`` split.
+This module owns the *pieces* (parse, query, screen, fallback, ranking); they are wrapped as the
+``screen_by_strategy`` chat tool in ``agent.tools`` (which enriches + re-filters the survivors).
 """
 from __future__ import annotations
 

@@ -66,12 +66,24 @@ async function pullModel() {
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
+// Conversation memory: send the last few turns so follow-ups ("prüf News für CRNX") can refer back.
+// The tool-trace lines (> 🔧 …) are stripped to keep the context compact.
+function buildHistory(): { role: string; content: string }[] {
+  const msgs: { role: string; content: string }[] = []
+  for (const t of history.value.slice(0, 3).reverse()) {
+    msgs.push({ role: 'user', content: t.q.slice(0, 600) })
+    const a = t.a.split('\n').filter((l) => !l.trim().startsWith('> 🔧')).join('\n').slice(0, 1200)
+    if (a.trim()) msgs.push({ role: 'assistant', content: a })
+  }
+  return msgs
+}
+
 function ask() {
   const q = question.value.trim()
   if (!q || running.value) return
   running.value = true
   answer.value = ''
-  const source = api.agent.ask(q, portfolio.currentPrices)
+  const source = api.agent.ask(q, portfolio.currentPrices, buildHistory())
   source.onmessage = (e) => {
     if (e.data === '[DONE]') {
       running.value = false

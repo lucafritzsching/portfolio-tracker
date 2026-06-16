@@ -337,21 +337,29 @@ async def chat_stream(
 
 
 async def ask_stream(
-    question: str, db: AsyncSession, current_prices: dict[str, float] | None = None
+    question: str,
+    db: AsyncSession,
+    current_prices: dict[str, float] | None = None,
+    history: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Unified routing agent: ONE free-text question → the LLM picks the right tool(s) →
     visible tool-trace + a grounded German explanation. Routing is via native Ollama tool-calling
     (temperature 0 for reproducibility); the tools are deterministic/guarded (screen, NL-clamp, DS).
+
+    ``history`` carries prior {role, content} turns (conversation memory) so a follow-up like
+    "prüf News für CRNX" can refer back. Only the last few turns are kept (context/compute budget).
     """
     question = (question or "").strip()
     if not question:
         yield "_Keine Frage angegeben._\n"
         return
-    logger.info("ask_stream: %r", question[:200])
-    messages = [
-        {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+    logger.info("ask_stream: %r (history=%d)", question[:200], len(history or []))
+    messages: list[dict] = [{"role": "system", "content": ROUTER_SYSTEM_PROMPT}]
+    for m in (history or [])[-6:]:           # letzte ~3 Turns (user+assistant)
+        role, content = m.get("role"), (m.get("content") or "")[:1500]
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": question})
     executor = ToolExecutor(db=db, current_prices=current_prices or {})
     async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0):
         yield chunk
