@@ -113,6 +113,21 @@ def test_run_screen_returns_empty_on_failure():
     assert candidates == [] and source == "error"
 
 
+def test_run_screen_drops_rows_violating_market_cap_bounds():
+    """The live screen can return rows that break the requested cap; run_screen re-applies it."""
+    async def fake_screen(filters, size):
+        return [
+            {"symbol": "OK", "shortName": "Under cap", "marketCap": 3.5e9},
+            {"symbol": "BIG", "shortName": "Over cap", "marketCap": 4.78e9},   # > 4 Mrd → dropped
+            {"symbol": "NOMC", "shortName": "Unknown cap"},                    # no cap → kept
+        ]
+
+    candidates, _ = asyncio.run(run_screen({"max_market_cap": 4e9}, screen_fn=fake_screen))
+    tickers = [c.ticker for c in candidates]
+    assert "OK" in tickers and "NOMC" in tickers
+    assert "BIG" not in tickers
+
+
 # ── fallback universe ────────────────────────────────────────────────────────────
 
 def test_fallback_universe_loads_candidates():

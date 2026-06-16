@@ -210,15 +210,36 @@ async def _default_screen(filters: dict, size: int) -> list[dict]:
     return res.get("quotes", []) if isinstance(res, dict) else []
 
 
+def _within_market_cap(c: ScreenCandidate, filters: dict) -> bool:
+    """Deterministic re-check of the parsed market-cap bounds.
+
+    Yahoo's ``intradaymarketcap`` predicate is not reliably enforced on the rows it returns — a live
+    screen for "< 4 Mrd." can still include a 4.78 Mrd. name. We re-apply the bounds here so an
+    over-cap row never reaches the user. Candidates without a market cap are kept (no grounds to drop).
+    """
+    mc = c.market_cap
+    if mc is None:
+        return True
+    mx = filters.get("max_market_cap")
+    if mx is not None and mc > mx:
+        return False
+    mn = filters.get("min_market_cap")
+    if mn is not None and mc < mn:
+        return False
+    return True
+
+
 async def run_screen(filters: dict, *, size: int = SCREEN_SIZE, screen_fn=None) -> tuple[list[ScreenCandidate], str]:
-    """Run the live screen. Returns (candidates, source). On any failure returns ([], "error")
-    so the caller can fall back to the curated universe."""
+    """Run the live screen, then deterministically re-apply the parsed market-cap bounds (the live
+    screen occasionally returns rows that violate them). Returns (candidates, source). On any failure
+    returns ([], "error") so the caller can fall back to the curated universe."""
     fn = screen_fn or _default_screen
     try:
         rows = await fn(filters, size)
     except Exception:
         return [], "error"
     candidates = [c for c in (_row_to_candidate(r) for r in rows) if c.ticker]
+    candidates = [c for c in candidates if _within_market_cap(c, filters)]
     return candidates, "yfinance_screen"
 
 
