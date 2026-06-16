@@ -2,7 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import init_db
+from database import init_db, seed_demo_positions
 from routers import portfolio, quotes, market_data, agent
 from routers import eval as eval_router
 
@@ -19,6 +19,7 @@ logging.getLogger("agent").setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await seed_demo_positions()   # only seeds when the portfolio is empty
     yield
 
 

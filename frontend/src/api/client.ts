@@ -79,6 +79,16 @@ export const api = {
     status: () => request<AgentStatus>('/agent/status'),
     pullModel: () => fetch(`${BASE}/agent/pull-model`, { method: 'POST' }),
 
+    // Deterministic statistical models for one ticker (ARIMA + RandomForest), no LLM — the
+    // "📊 Statistik" button in the positions view.
+    quickStats: (ticker: string) =>
+      request<{
+        ticker: string
+        error?: string
+        arima?: { signal: string; confidence: number | null; forecast_30d: number | null; details: string }
+        random_forest?: { signal: string; confidence: number | null; details: string }
+      }>(`/agent/quick-stats/${ticker}`),
+
     // Unified routing agent: one free-text question → the LLM routes to the right tool
     // (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE).
     ask: (

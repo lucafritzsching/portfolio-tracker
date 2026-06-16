@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { api } from '@/api/client'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { useUiStore } from '@/stores/ui'
 import { useFormatters } from '@/composables/useFormatters'
@@ -10,6 +11,34 @@ const portfolio = usePortfolioStore()
 const ui = useUiStore()
 const { fmt, fmtPct, fmtDate } = useFormatters()
 const { getSignal } = useSignal()
+
+// Ticker/name search filter
+const search = ref('')
+const filteredPositions = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return portfolio.positions
+  return portfolio.positions.filter(
+    (p) => p.ticker.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q),
+  )
+})
+
+// Deterministic statistics per position (ARIMA + RandomForest, no LLM)
+const statResults = ref<Record<string, any>>({})
+const statRunning = ref<Record<string, boolean>>({})
+async function runStats(ticker: string) {
+  if (statRunning.value[ticker]) return
+  statRunning.value[ticker] = true
+  try {
+    statResults.value[ticker] = await api.agent.quickStats(ticker)
+  } catch (e: any) {
+    statResults.value[ticker] = { ticker, error: e.message }
+  } finally {
+    statRunning.value[ticker] = false
+  }
+}
+function pct(x: number | null | undefined) {
+  return x != null ? `${Math.round(x * 100)}%` : '–'
+}
 
 const expandedTicker = ref<string | null>(null)
 const showTxModal = ref(false)
@@ -57,16 +86,25 @@ async function removePosition(ticker: string) {
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
       <h1 class="section-title" style="margin: 0">Positionen ({{ portfolio.positions.length }})</h1>
       <button class="btn btn-primary" @click="ui.openAddModal()">+ Position hinzufügen</button>
     </div>
 
+    <input
+      v-model="search"
+      placeholder="🔍 Suche nach Ticker oder Name…"
+      style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px; margin-bottom: 16px"
+    />
+
     <div v-if="portfolio.positions.length === 0" class="card" style="text-align: center; padding: 40px; color: var(--text-tertiary)">
       Noch keine Positionen.
     </div>
+    <div v-else-if="filteredPositions.length === 0" class="card" style="text-align: center; padding: 24px; color: var(--text-tertiary)">
+      Keine Treffer für diese Suche.
+    </div>
 
-    <div v-for="pos in portfolio.positions" :key="pos.ticker" class="card" style="margin-bottom: 14px">
+    <div v-for="pos in filteredPositions" :key="pos.ticker" class="card" style="margin-bottom: 14px">
       <!-- Position Header -->
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px">
         <div>
@@ -107,12 +145,35 @@ async function removePosition(ticker: string) {
       <!-- Action Buttons -->
       <div style="display: flex; gap: 8px; flex-wrap: wrap">
         <button class="btn btn-sm btn-primary" @click="openTxModal(pos.ticker)">+ Transaktion</button>
+        <button class="btn btn-sm" @click="runStats(pos.ticker)" :disabled="statRunning[pos.ticker]">
+          <span v-if="statRunning[pos.ticker]" class="spinner" /> 📊 Statistik
+        </button>
         <button class="btn btn-sm" @click="toggleHistory(pos.ticker)">
           {{ expandedTicker === pos.ticker ? 'Verlauf ausblenden' : 'Verlauf' }}
           ({{ pos.transactions?.length ?? 0 }})
         </button>
         <button class="btn btn-sm" @click="ui.navigate('chat')">KI-Agent</button>
         <button class="btn btn-sm btn-danger" @click="removePosition(pos.ticker)">Löschen</button>
+      </div>
+
+      <!-- Deterministic statistics (ARIMA + RandomForest), no LLM -->
+      <div v-if="statResults[pos.ticker]" class="card" style="margin-top: 12px; background: var(--bg-secondary); font-size: 13px">
+        <template v-if="statResults[pos.ticker].error">
+          <span style="color: var(--red)">{{ statResults[pos.ticker].error }}</span>
+        </template>
+        <template v-else>
+          <div style="font-weight: 700; margin-bottom: 6px">📊 Statistik (deterministisch, ohne LLM)</div>
+          <div>
+            <strong>ARIMA:</strong> {{ statResults[pos.ticker].arima.signal }}
+            (Konfidenz {{ pct(statResults[pos.ticker].arima.confidence) }})
+            <span v-if="statResults[pos.ticker].arima.forecast_30d">· 30T-Prognose $ {{ statResults[pos.ticker].arima.forecast_30d }}</span>
+          </div>
+          <div>
+            <strong>Random Forest:</strong> {{ statResults[pos.ticker].random_forest.signal }}
+            (Konfidenz {{ pct(statResults[pos.ticker].random_forest.confidence) }})
+          </div>
+          <div style="color: var(--text-tertiary); margin-top: 4px; font-size: 12px">{{ statResults[pos.ticker].random_forest.details }}</div>
+        </template>
       </div>
 
       <!-- Transaction History -->

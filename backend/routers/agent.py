@@ -1,4 +1,5 @@
 """Agent SSE streaming endpoint."""
+import asyncio
 import json
 import logging
 from fastapi import APIRouter, Query
@@ -114,6 +115,32 @@ async def ask(
     if not isinstance(hist, list):
         hist = []
     return _sse(lambda db: ask_stream(question, db, prices, hist))
+
+
+@router.get("/quick-stats/{ticker}")
+async def quick_stats(ticker: str):
+    """Deterministic statistical models (ARIMA + RandomForest) for a ticker — fast, NO LLM.
+
+    Powers the "📊 Statistik" button in the positions view: one quick, reproducible call (CPU only,
+    off the event loop) → ARIMA forecast/signal + RandomForest signal with honest confidence/OOS detail.
+    """
+    from services.market_data import fetch_and_store_prices, prices_to_dicts
+    from agent.data_science import run_arima_forecast, run_ml_signal
+
+    ticker = ticker.upper()
+    async with AsyncSessionLocal() as db:
+        rows = await fetch_and_store_prices(ticker, db, period="2y")
+    prices = prices_to_dicts(rows)
+    if not prices:
+        return {"ticker": ticker, "error": "Keine Kursdaten verfügbar."}
+    arima = await asyncio.to_thread(run_arima_forecast, prices)
+    ml = await asyncio.to_thread(run_ml_signal, prices)
+    return {
+        "ticker": ticker,
+        "arima": {"signal": arima.signal, "confidence": arima.confidence,
+                  "forecast_30d": arima.forecast_30d, "details": arima.details},
+        "random_forest": {"signal": ml.signal, "confidence": ml.confidence, "details": ml.details},
+    }
 
 
 @router.get("/news-summary/{ticker}")

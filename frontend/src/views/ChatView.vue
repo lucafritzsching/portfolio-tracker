@@ -14,6 +14,7 @@ const question = ref('')
 const answer = ref('')
 const running = ref(false)
 const history = ref<{ q: string; a: string }[]>([])
+const lastQuestion = ref('')
 
 // ── Setup / Agent status (moved here from the old analysis view) ──────────────
 const agentStatus = ref<AgentStatus | null>(null)
@@ -78,11 +79,30 @@ function buildHistory(): { role: string; content: string }[] {
   return msgs
 }
 
+// Export exactly what the agent did (question + full answer incl. visible 🔧 tool-trace) as a .txt.
+function exportLog() {
+  const q = lastQuestion.value || history.value[0]?.q || ''
+  const a = answer.value || history.value[0]?.a || ''
+  if (!a) return
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const text =
+    `PortfAIo — KI-Agent Log\nZeit: ${new Date().toLocaleString('de-DE')}\n\n` +
+    `Frage:\n${q}\n\nAntwort (inkl. sichtbarer Tool-Trace):\n${a}\n`
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `agent-log-${ts}.txt`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function ask() {
   const q = question.value.trim()
   if (!q || running.value) return
   running.value = true
   answer.value = ''
+  lastQuestion.value = q
   const source = api.agent.ask(q, portfolio.currentPrices, buildHistory())
   source.onmessage = (e) => {
     if (e.data === '[DONE]') {
@@ -153,6 +173,9 @@ function ask() {
       </div>
     </div>
 
+    <div v-if="answer && !running" style="display: flex; justify-content: flex-end; margin-bottom: 8px">
+      <button class="btn btn-sm" @click="exportLog" title="Frage + Antwort + Tool-Trace als .txt speichern">⬇ Log exportieren</button>
+    </div>
     <div v-if="answer" class="card ai-box markdown" v-html="md.render(answer)"></div>
     <div v-else-if="running" class="card ai-box" style="display: flex; align-items: center; gap: 10px; color: var(--text-tertiary)">
       <span class="spinner" /> Agent wählt Werkzeuge und sammelt Daten…

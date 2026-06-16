@@ -72,6 +72,7 @@ async function submit() {
             class="form-input"
             placeholder="z.B. AAPL"
             @keyup.enter="lookupTicker"
+            @blur="lookupTicker"
             style="flex: 1; text-transform: uppercase"
           />
           <button class="btn btn-sm" @click="lookupTicker" :disabled="quoteLoading">
