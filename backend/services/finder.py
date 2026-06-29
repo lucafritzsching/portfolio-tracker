@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,8 @@ import yfinance as yf
 
 from config import settings
 from services.nl_target import NLVerdict
+
+logger = logging.getLogger("agent")
 
 # Yahoo exchange codes we accept (mapped from human words in the mandate).
 EXCHANGE_MAP = {"nasdaq": "NMS", "nyse": "NYQ", "amex": "ASE"}
@@ -237,6 +240,7 @@ async def run_screen(filters: dict, *, size: int = SCREEN_SIZE, screen_fn=None) 
     try:
         rows = await fn(filters, size)
     except Exception:
+        logger.warning("Live-Screen fehlgeschlagen (filters=%s) — Fallback-Universum", filters, exc_info=True)
         return [], "error"
     candidates = [c for c in (_row_to_candidate(r) for r in rows) if c.ticker]
     candidates = [c for c in candidates if _within_market_cap(c, filters)]
@@ -251,6 +255,7 @@ def load_fallback_universe() -> list[ScreenCandidate]:
     try:
         rows = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        logger.warning("Fallback-Universum nicht ladbar (%s) — leere Liste", path, exc_info=True)
         return []
     return [
         ScreenCandidate(

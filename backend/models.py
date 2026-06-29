@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from decimal import Decimal
-from sqlalchemy import String, Numeric, Integer, Boolean, Date, DateTime, Text, ForeignKey, Index
+from typing import Any
+from sqlalchemy import String, Numeric, Integer, Boolean, Date, DateTime, Text, ForeignKey, Index, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
@@ -121,6 +122,32 @@ class AnalysisResult(Base):
     analysis_text: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AgentRun(Base):
+    """One row per live `/ask` agent invocation — the durable chat history AND full audit trail.
+
+    The free-text routing agent has no fixed ticker and no single decision, so it does not fit the
+    ticker/decision-centric AnalysisResult/AnalysisMetric tables. The whole tool trace (tool calls +
+    their results — which already contain news judgements, rankings, scores, evidence) is stored
+    UNTRUNCATED as one JSON column; no per-tool child tables (kept deliberately simple).
+    """
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    # List of {step, tool, args, result} — the complete, untruncated tool trace.
+    trace: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")  # ok | error
+
+    # Ollama timing (best-effort, may be absent)
+    total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eval_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_per_sec: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 class AnalysisMetric(Base):

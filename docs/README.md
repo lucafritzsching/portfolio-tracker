@@ -25,6 +25,7 @@ Diese Dokumentation richtet sich an **Teammitglieder und KI-Agenten** und erklä
 | 10 | [10-experiment-alt-b.md](10-experiment-alt-b.md) | **Alt-B-Experiment**: NL-Ziel-Agent (Freitext→Output), 3 Achsen, fast/agentic, Halluzinations-Messung |
 | 11 | [11-projekt-journey.md](11-projekt-journey.md) | **Projekt-Journey**: Prozess, Team-Aufteilung, Cross-Team-Entscheidungen, Zeitleiste, Lessons |
 | 12 | [12-data-science-methodik.md](12-data-science-methodik.md) | **DS-Methodik**: ARIMA/RandomForest/Ensemble — Daten, Labels, Validierung, Grenzen (ehrlich) |
+| 14 | [14-technische-codeuebersicht.md](14-technische-codeuebersicht.md) | **Technische Gesamtübersicht (Präsentation)**: System-/Agent-/Tool-Loop-Flowcharts, Funktions-/Tool-Tabellen, KI-vs-deterministisch, alle Endpunkte, Datenmodell, Persistenz/Trace/History |
 
 > **Aktueller Stand (Refactor, ADR-16/17):** Die Agenten-Funktionen sind zu **einem Chat-Fenster**
 > zusammengeführt, das je nach Anfrage **routet** — Strategie-Screen, **sektor-agnostisches** News-/

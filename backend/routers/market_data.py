@@ -9,6 +9,7 @@ from services.market_data import (
     fetch_and_store_fundamentals,
     fetch_and_store_news,
 )
+from utils import normalize_ticker
 
 router = APIRouter(prefix="/market-data", tags=["market-data"])
 
@@ -19,17 +20,19 @@ async def get_price_history(
     period: str = Query("1y", description="1mo, 3mo, 6mo, 1y, 2y, 5y"),
     db: AsyncSession = Depends(get_db),
 ):
+    ticker = normalize_ticker(ticker)
     rows = await fetch_and_store_prices(ticker, db, period=period)
     if not rows:
-        raise HTTPException(404, f"Keine Kursdaten für {ticker.upper()} gefunden")
+        raise HTTPException(404, f"Keine Kursdaten für {ticker} gefunden")
     return rows
 
 
 @router.get("/fundamentals/{ticker}", response_model=FundamentalsOut)
 async def get_fundamentals(ticker: str, db: AsyncSession = Depends(get_db)):
+    ticker = normalize_ticker(ticker)
     obj = await fetch_and_store_fundamentals(ticker, db)
     if obj is None:
-        raise HTTPException(404, f"Keine Fundamentaldaten für {ticker.upper()}")
+        raise HTTPException(404, f"Keine Fundamentaldaten für {ticker}")
     return FundamentalsOut(
         ticker=obj.ticker,
         pe_ratio=float(obj.pe_ratio) if obj.pe_ratio is not None else None,
@@ -65,6 +68,7 @@ async def warmup(db: AsyncSession = Depends(get_db)):
 
 @router.get("/news/{ticker}", response_model=list[NewsItemOut])
 async def get_news(ticker: str, days: int = Query(7, le=30), db: AsyncSession = Depends(get_db)):
+    ticker = normalize_ticker(ticker)
     news = await fetch_and_store_news(ticker, db, days=days)
     return [
         NewsItemOut(

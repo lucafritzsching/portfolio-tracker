@@ -5,11 +5,14 @@ caller's keyword score when the LLM is unreachable or returns junk.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import httpx
 
 from config import settings
+
+logger = logging.getLogger("agent")
 
 
 async def score_sentiment_llm(headlines: list[str]) -> float | None:
@@ -36,9 +39,11 @@ async def score_sentiment_llm(headlines: list[str]) -> float | None:
             resp.raise_for_status()
             text = resp.json().get("message", {}).get("content", "")
     except Exception:
+        logger.warning("LLM-Sentiment fehlgeschlagen — Fallback auf Keyword-Score", exc_info=True)
         return None
 
     match = re.search(r"-?\d+(?:\.\d+)?", text)
     if not match:
+        logger.warning("LLM-Sentiment ohne verwertbare Zahl: %r — Fallback", text[:120])
         return None
     return max(-1.0, min(1.0, float(match.group())))

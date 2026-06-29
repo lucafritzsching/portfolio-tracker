@@ -159,3 +159,23 @@ class ImportPayload(BaseModel):
 class AnalyzeRequest(BaseModel):
     ticker: str
     include_portfolio_context: bool = True
+
+
+# ── Agent runs (persisted chat history + trace) ──────────────────────────────────
+
+class AgentRunSummaryOut(BaseModel):
+    # protected_namespaces=() avoids the Pydantic warning about the `model` field name.
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+    id: int
+    question: str
+    answer: str
+    model: str
+    status: str
+    total_ms: int | None
+    eval_tokens: int | None
+    tokens_per_sec: Decimal | None
+    created_at: datetime
+
+
+class AgentRunOut(AgentRunSummaryOut):
+    trace: list = []

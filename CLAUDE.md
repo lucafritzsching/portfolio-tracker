@@ -33,7 +33,8 @@ vision ([01](docs/01-vision-und-ziele.md)), architecture + trade-offs ([02](docs
 **the hybrid agent** ([03](docs/03-agent-design.md)), backend ([04](docs/04-backend.md)),
 frontend ([05](docs/05-frontend.md)), setup ([06](docs/06-setup-und-betrieb.md)),
 decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/08-api-referenz.md)),
-**release v2.0-baseline changelog** ([09](docs/09-release-v2.0-baseline.md)).
+**release v2.0-baseline changelog** ([09](docs/09-release-v2.0-baseline.md)),
+**technical whole-project overview / flowcharts** ([14](docs/14-technische-codeuebersicht.md)).
 
 ## Architecture (Production)
 

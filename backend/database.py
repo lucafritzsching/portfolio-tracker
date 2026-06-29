@@ -2,7 +2,17 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 from config import settings
 
-engine = create_async_engine(settings.database_url, echo=False)
+# Pool-Parameter nur für Server-DBs (Postgres). SQLite (Tests) nutzt ein eigenes Pool-Modell
+# und akzeptiert pool_size/max_overflow nicht — daher konditional.
+_engine_kwargs: dict = {"echo": False, "pool_pre_ping": settings.db_pool_pre_ping}
+if not settings.database_url.startswith("sqlite"):
+    _engine_kwargs.update(
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_recycle=settings.db_pool_recycle,
+    )
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

@@ -29,6 +29,7 @@ from eval.faithfulness import check_faithfulness, apply_faithfulness_gate
 from agent.evidence import render as render_evidence
 from models import Position, AnalysisResult, AnalysisMetric
 from services.market_data import fetch_and_store_news
+from repositories.agent_repo import create_run
 
 logger = logging.getLogger("agent")
 
@@ -215,8 +216,10 @@ async def _run_agent_loop(
                 yield f"\n\n> 🔧 Führe Tool aus: **{tool_name}**({_fmt_args(arguments)})…\n"
             tool_result = await executor.execute(tool_name, arguments)
             if trace is not None:
+                # Store the FULL result for persistence; truncation happens only when the trace is
+                # serialized for the frontend event (see ask_stream).
                 trace.append({"step": iteration, "tool": tool_name, "args": arguments,
-                              "result": tool_result[:2500]})
+                              "result": tool_result})
             messages.append({"role": "tool", "content": tool_result})
 
     messages.append({"role": "user", "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung."})
@@ -280,7 +283,9 @@ async def _record_metric(
             faithfulness_notes=faith["notes"] or None,
         ))
     except Exception:
-        pass
+        # Metrik-Erfassung ist best-effort und darf die Analyse nie abbrechen — aber der Fehler
+        # muss sichtbar sein (vorher still verschluckt), sonst fehlen Metriken unbemerkt.
+        logger.exception("Metrik-Erfassung fehlgeschlagen für %s", ticker)
 
 
 async def analyze_portfolio_stream(
@@ -340,6 +345,15 @@ async def chat_stream(
         yield chunk
 
 
+def _perf_from_stats(stats: dict) -> tuple[int | None, int | None, float | None]:
+    """Derive (total_ms, eval_tokens, tokens_per_sec) from Ollama's timing fields (best-effort)."""
+    eval_count = stats.get("eval_count")
+    eval_duration = stats.get("eval_duration")
+    tps = round(eval_count / (eval_duration / 1e9), 2) if eval_count and eval_duration else None
+    total_ms = int(stats["total_duration"] / 1e6) if stats.get("total_duration") else None
+    return total_ms, eval_count, tps
+
+
 async def ask_stream(
     question: str,
     db: AsyncSession,
@@ -366,11 +380,30 @@ async def ask_stream(
     messages.append({"role": "user", "content": question})
     executor = ToolExecutor(db=db, current_prices=current_prices or {})
     trace: list = []
-    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0, trace=trace):
+    stats: dict = {}
+    answer_parts: list[str] = []
+    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0,
+                                       trace=trace, stats=stats):
+        if not chunk.startswith("\n\n> 🔧"):   # keep the visible tool-trace out of the saved answer
+            answer_parts.append(chunk)
         yield chunk
     # Final structured trace (tool calls + results) — the frontend captures it for the exportable log
-    # and a collapsible trace view; it is NOT rendered into the visible answer.
-    yield "␞TRACE␞" + json.dumps({"question": question, "trace": trace}, ensure_ascii=False, default=str)
+    # and a collapsible trace view; it is NOT rendered into the visible answer. Results are truncated
+    # for the SSE payload only; the DB keeps the full trace.
+    fe_trace = [{**step, "result": (step.get("result") or "")[:2500]} for step in trace]
+    yield "␞TRACE␞" + json.dumps({"question": question, "trace": fe_trace}, ensure_ascii=False, default=str)
+
+    # Persist the run (chat history + full audit trail). Best-effort: a persistence failure must
+    # never break the already-streamed answer.
+    answer = "".join(answer_parts).strip()
+    total_ms, eval_tokens, tps = _perf_from_stats(stats)
+    status = "ok" if answer and "[Fehler" not in answer else "error"
+    try:
+        await create_run(db, question=question, answer=answer, model=settings.ollama_model,
+                         trace=trace, status=status, total_ms=total_ms,
+                         eval_tokens=eval_tokens, tokens_per_sec=tps)
+    except Exception:
+        logger.exception("Persistenz des Agent-Laufs fehlgeschlagen")
 
 
 async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[str, None]:

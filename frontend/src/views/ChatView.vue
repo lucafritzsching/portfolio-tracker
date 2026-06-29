@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { api } from '@/api/client'
 import { useMarkdown } from '@/composables/useMarkdown'
-import type { AgentStatus } from '@/types'
+import type { AgentStatus, AgentTraceStep } from '@/types'
 
 // THE single agent window. One free-text question → the backend routing agent picks the right tool
 // (strategy screen / NL-news judgment / statistics) and streams a visible tool-trace + explanation.
@@ -13,7 +13,10 @@ const md = useMarkdown()
 const question = ref('')
 const answer = ref('')
 const running = ref(false)
-const history = ref<{ q: string; a: string }[]>([])
+// id > 0 → persisted run (trace loadable on demand); id === -1 → just-asked, in-session entry.
+const history = ref<{ id: number; q: string; a: string }[]>([])
+const tracesById = ref<Record<number, AgentTraceStep[]>>({})
+const traceState = ref<Record<number, 'loading' | 'error' | 'done'>>({})
 const lastQuestion = ref('')
 const lastTrace = ref<{ question?: string; trace?: { step: number; tool: string; args: any; result: string }[] } | null>(null)
 const TRACE_MARKER = '␞TRACE␞'   // backend marks the structured trace event with this sentinel
@@ -26,11 +29,32 @@ const warmMsg = ref('')
 const pulling = ref(false)
 const pullLog = ref('')
 
-onMounted(checkStatus)
+onMounted(() => { checkStatus(); loadHistory() })
 
 async function checkStatus() {
   statusLoading.value = true
   try { agentStatus.value = await api.agent.status() } finally { statusLoading.value = false }
+}
+
+// Load the persisted chat history so a reload no longer loses everything. Best-effort.
+async function loadHistory() {
+  try {
+    const runs = await api.agent.runs()
+    history.value = runs.map((r) => ({ id: r.id, q: r.question, a: r.answer }))
+  } catch { /* persisted history is best-effort; keep the in-memory list */ }
+}
+
+// Lazy-load the full tool trace of a past run when its section is opened.
+async function loadTrace(id: number) {
+  if (id <= 0 || traceState.value[id]) return
+  traceState.value[id] = 'loading'
+  try {
+    const run = await api.agent.run(id)
+    tracesById.value[id] = run.trace ?? []
+    traceState.value[id] = 'done'
+  } catch {
+    traceState.value[id] = 'error'
+  }
 }
 
 async function warmup() {
@@ -126,7 +150,7 @@ function ask() {
     if (e.data === '[DONE]') {
       running.value = false
       source.close()
-      if (answer.value) history.value.unshift({ q, a: answer.value })
+      if (answer.value) history.value.unshift({ id: -1, q, a: answer.value })
       question.value = ''
       return
     }
@@ -213,9 +237,27 @@ function ask() {
 
     <div v-if="history.length > 1 || (history.length === 1 && !answer)" style="margin-top: 24px">
       <h3 class="section-title" style="font-size: 14px">Verlauf</h3>
-      <div v-for="(h, i) in history.slice(answer ? 1 : 0)" :key="i" class="card" style="margin-bottom: 12px">
+      <div v-for="(h, i) in history.slice(answer ? 1 : 0)" :key="h.id > 0 ? h.id : 'live-' + i" class="card" style="margin-bottom: 12px">
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px">Frage: {{ h.q }}</div>
         <div class="markdown" v-html="md.render(h.a)"></div>
+        <details v-if="h.id > 0" style="margin-top: 8px" @toggle="loadTrace(h.id)">
+          <summary style="cursor: pointer; font-size: 12px; color: var(--text-secondary)">🔍 Agent-Trace</summary>
+          <div v-if="traceState[h.id] === 'loading'" style="font-size: 12px; color: var(--text-tertiary); margin-top: 6px">
+            <span class="spinner" /> lädt…
+          </div>
+          <div v-else-if="traceState[h.id] === 'error'" style="font-size: 12px; color: var(--red); margin-top: 6px">
+            Trace konnte nicht geladen werden.
+          </div>
+          <template v-else-if="traceState[h.id] === 'done'">
+            <template v-if="(tracesById[h.id] || []).length">
+              <div v-for="(s, j) in (tracesById[h.id] || [])" :key="j" style="margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px">
+                <div style="font-size: 12px"><strong>Schritt {{ s.step }}: {{ s.tool }}</strong> ({{ JSON.stringify(s.args) }})</div>
+                <pre style="white-space: pre-wrap; word-break: break-word; font-size: 11px; color: var(--text-secondary); margin: 4px 0 0; max-height: 220px; overflow-y: auto">{{ s.result }}</pre>
+              </div>
+            </template>
+            <div v-else style="font-size: 12px; color: var(--text-tertiary); margin-top: 6px">(Keine Tool-Aufrufe — direkt geantwortet.)</div>
+          </template>
+        </details>
       </div>
     </div>
   </div>

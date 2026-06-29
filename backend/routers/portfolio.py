@@ -11,6 +11,7 @@ from schemas import (
     SavingsPlanCreate, SavingsPlanOut,
     ImportPayload,
 )
+from utils import normalize_ticker
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -25,11 +26,12 @@ async def list_positions(db: AsyncSession = Depends(get_db)):
 
 @router.post("/positions", response_model=PositionOut, status_code=201)
 async def create_position(body: PositionCreate, db: AsyncSession = Depends(get_db)):
-    existing = await db.execute(select(Position).where(Position.ticker == body.ticker.upper()))
+    ticker = normalize_ticker(body.ticker)
+    existing = await db.execute(select(Position).where(Position.ticker == ticker))
     if existing.scalar_one_or_none():
-        raise HTTPException(400, f"Position {body.ticker.upper()} existiert bereits")
+        raise HTTPException(400, f"Position {ticker} existiert bereits")
     data = body.model_dump()
-    data["ticker"] = data["ticker"].upper()
+    data["ticker"] = ticker
     pos = Position(**data)
     db.add(pos)
     await db.commit()
@@ -39,19 +41,21 @@ async def create_position(body: PositionCreate, db: AsyncSession = Depends(get_d
 
 @router.get("/positions/{ticker}", response_model=PositionOut)
 async def get_position(ticker: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Position).where(Position.ticker == ticker.upper()))
+    ticker = normalize_ticker(ticker)
+    result = await db.execute(select(Position).where(Position.ticker == ticker))
     pos = result.scalar_one_or_none()
     if not pos:
-        raise HTTPException(404, f"Position {ticker.upper()} nicht gefunden")
+        raise HTTPException(404, f"Position {ticker} nicht gefunden")
     return pos
 
 
 @router.patch("/positions/{ticker}", response_model=PositionOut)
 async def update_position(ticker: str, body: PositionUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Position).where(Position.ticker == ticker.upper()))
+    ticker = normalize_ticker(ticker)
+    result = await db.execute(select(Position).where(Position.ticker == ticker))
     pos = result.scalar_one_or_none()
     if not pos:
-        raise HTTPException(404, f"Position {ticker.upper()} nicht gefunden")
+        raise HTTPException(404, f"Position {ticker} nicht gefunden")
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(pos, field, value)
     await db.commit()
@@ -61,10 +65,11 @@ async def update_position(ticker: str, body: PositionUpdate, db: AsyncSession = 
 
 @router.delete("/positions/{ticker}", status_code=204)
 async def delete_position(ticker: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Position).where(Position.ticker == ticker.upper()))
+    ticker = normalize_ticker(ticker)
+    result = await db.execute(select(Position).where(Position.ticker == ticker))
     pos = result.scalar_one_or_none()
     if not pos:
-        raise HTTPException(404, f"Position {ticker.upper()} nicht gefunden")
+        raise HTTPException(404, f"Position {ticker} nicht gefunden")
     await db.delete(pos)
     await db.commit()
 
@@ -73,7 +78,7 @@ async def delete_position(ticker: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/positions/{ticker}/transactions", response_model=TransactionOut, status_code=201)
 async def add_transaction(ticker: str, body: TransactionCreate, db: AsyncSession = Depends(get_db)):
-    ticker = ticker.upper()
+    ticker = normalize_ticker(ticker)
     result = await db.execute(select(Position).where(Position.ticker == ticker))
     pos = result.scalar_one_or_none()
     if not pos:
@@ -99,8 +104,9 @@ async def add_transaction(ticker: str, body: TransactionCreate, db: AsyncSession
 
 @router.get("/positions/{ticker}/transactions", response_model=list[TransactionOut])
 async def list_transactions(ticker: str, db: AsyncSession = Depends(get_db)):
+    ticker = normalize_ticker(ticker)
     result = await db.execute(
-        select(Transaction).where(Transaction.ticker == ticker.upper()).order_by(Transaction.date)
+        select(Transaction).where(Transaction.ticker == ticker).order_by(Transaction.date)
     )
     return result.scalars().all()
 
@@ -116,7 +122,7 @@ async def list_savings_plans(db: AsyncSession = Depends(get_db)):
 @router.post("/savings-plans", response_model=SavingsPlanOut, status_code=201)
 async def create_savings_plan(body: SavingsPlanCreate, db: AsyncSession = Depends(get_db)):
     data = body.model_dump()
-    data["ticker"] = data["ticker"].upper()
+    data["ticker"] = normalize_ticker(data["ticker"])
     plan = SavingsPlan(**data)
     db.add(plan)
     await db.commit()
@@ -189,7 +195,7 @@ async def import_legacy_data(payload: ImportPayload, db: AsyncSession = Depends(
 
     for lp in payload.positions:
         pos = Position(
-            ticker=lp.ticker.upper(),
+            ticker=normalize_ticker(lp.ticker),
             name=lp.name,
             shares=Decimal(str(lp.shares)),
             sector=lp.sector,
@@ -200,7 +206,7 @@ async def import_legacy_data(payload: ImportPayload, db: AsyncSession = Depends(
 
     for lt in payload.transactions:
         tx = Transaction(
-            ticker=lt.ticker.upper(),
+            ticker=normalize_ticker(lt.ticker),
             type=lt.type,
             shares=Decimal(str(lt.shares)),
             price=Decimal(str(lt.price)),

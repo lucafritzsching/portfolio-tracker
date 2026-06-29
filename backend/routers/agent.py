@@ -2,9 +2,13 @@
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, Query
+import math
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from database import AsyncSessionLocal
+from utils import normalize_ticker
+from repositories.agent_repo import save_quick_stats, list_recent_runs, get_run
+from schemas import AgentRunSummaryOut, AgentRunOut
 from agent.orchestrator import (
     analyze_stock_stream, analyze_portfolio_stream,
     chat_stream, news_summary_stream, rebalance_stream, ask_stream,
@@ -17,11 +21,32 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
+MAX_PRICE_ENTRIES = 500  # Obergrenze gegen aufgeblähte Eingaben (Hosting)
+
+
 def _parse_prices(current_prices: str) -> dict:
+    """Parse the client-supplied price map and bound it: object only, max N entries, and only
+    finite positive numbers (a negative/NaN price would silently corrupt downstream P&L/scoring)."""
     try:
-        return json.loads(current_prices) if current_prices else {}
+        raw = json.loads(current_prices) if current_prices else {}
     except json.JSONDecodeError:
+        logger.warning("current_prices ist kein gültiges JSON — ignoriert (%d Zeichen)", len(current_prices))
         return {}
+    if not isinstance(raw, dict):
+        logger.warning("current_prices ist kein JSON-Objekt — ignoriert")
+        return {}
+    clean: dict = {}
+    for key, value in list(raw.items())[:MAX_PRICE_ENTRIES]:
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(price) and price > 0:
+            clean[str(key)] = price
+    if len(clean) < len(raw):
+        logger.warning("current_prices: %d von %d Einträgen verworfen (ungültig oder über Limit)",
+                       len(raw) - len(clean), len(raw))
+    return clean
 
 
 # NOTE: these are GET endpoints because the browser's EventSource API can only
@@ -81,9 +106,11 @@ def _sse(stream_factory):
             try:
                 async for chunk in stream_factory(db):
                     yield f"data: {chunk.replace(chr(10), chr(92) + 'n')}\n\n"
-            except Exception as e:
+            except Exception:
+                # Vollständige Diagnose ins Server-Log; an den Client nur eine generische
+                # Meldung (keine internen Pfade/DB-Details leaken).
                 logger.exception("SSE-Stream-Fehler")
-                yield f"data: [FEHLER: {e}]\n\n"
+                yield "data: [FEHLER: Interner Fehler bei der Verarbeitung. Details siehe Server-Log.]\n\n"
             finally:
                 yield "data: [DONE]\n\n"
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
@@ -127,20 +154,41 @@ async def quick_stats(ticker: str):
     from services.market_data import fetch_and_store_prices, prices_to_dicts
     from agent.data_science import run_arima_forecast, run_ml_signal
 
-    ticker = ticker.upper()
+    ticker = normalize_ticker(ticker)
     async with AsyncSessionLocal() as db:
         rows = await fetch_and_store_prices(ticker, db, period="2y")
-    prices = prices_to_dicts(rows)
-    if not prices:
-        return {"ticker": ticker, "error": "Keine Kursdaten verfügbar."}
-    arima = await asyncio.to_thread(run_arima_forecast, prices)
-    ml = await asyncio.to_thread(run_ml_signal, prices)
+        prices = prices_to_dicts(rows)
+        if not prices:
+            return {"ticker": ticker, "error": "Keine Kursdaten verfügbar."}
+        arima = await asyncio.to_thread(run_arima_forecast, prices)
+        ml = await asyncio.to_thread(run_ml_signal, prices)
+        try:
+            await save_quick_stats(db, ticker, arima, ml)   # persist (reuses analysis_results)
+        except Exception:
+            logger.exception("Persistenz der Quick-Stats fehlgeschlagen für %s", ticker)
     return {
         "ticker": ticker,
         "arima": {"signal": arima.signal, "confidence": arima.confidence,
                   "forecast_30d": arima.forecast_30d, "details": arima.details},
         "random_forest": {"signal": ml.signal, "confidence": ml.confidence, "details": ml.details},
     }
+
+
+@router.get("/runs", response_model=list[AgentRunSummaryOut])
+async def list_runs(limit: int = Query(50, ge=1, le=200)):
+    """Persisted agent runs, newest first — the server-side chat history."""
+    async with AsyncSessionLocal() as db:
+        return await list_recent_runs(db, limit=limit)
+
+
+@router.get("/runs/{run_id}", response_model=AgentRunOut)
+async def get_run_detail(run_id: int):
+    """One persisted run incl. the full (untruncated) tool trace."""
+    async with AsyncSessionLocal() as db:
+        run = await get_run(db, run_id)
+    if not run:
+        raise HTTPException(404, "Agent-Lauf nicht gefunden")
+    return run
 
 
 @router.get("/news-summary/{ticker}")

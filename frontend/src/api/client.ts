@@ -1,9 +1,10 @@
 import type {
   Position, Transaction, SavingsPlan, Quote, Fundamentals, NewsItem, AgentStatus,
-  EvalMetrics, Backtest,
+  EvalMetrics, Backtest, AgentRunSummary, AgentRun,
 } from '@/types'
 
-const BASE = 'http://localhost:8000/api'
+// Configurable for deployment (VITE_API_BASE_URL); falls back to the local dev backend.
+const BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
@@ -102,6 +103,10 @@ export const api = {
         `${BASE}/agent/ask?question=${encodeURIComponent(question)}&current_prices=${p}&history=${h}`,
       )
     },
+
+    // Persisted agent runs (chat history + full trace), so a reload no longer loses everything.
+    runs: (limit = 50) => request<AgentRunSummary[]>(`/agent/runs?limit=${limit}`),
+    run: (id: number) => request<AgentRun>(`/agent/runs/${id}`),
   },
 
   // ── Eval ──────────────────────────────────────────────────────────────────────

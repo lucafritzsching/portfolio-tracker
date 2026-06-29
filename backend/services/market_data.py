@@ -7,6 +7,7 @@ blocking yfinance calls run via asyncio.to_thread to keep the event loop free.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, date, timedelta
 
 import httpx
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import PriceHistory, FundamentalsCache, NewsCache
+
+logger = logging.getLogger("agent")
 
 # Daily OHLCV bars: cache counts as fresh if the newest stored bar is within this
 # many calendar days (covers weekends/holidays without refetching every request).
@@ -49,11 +52,22 @@ async def fetch_and_store_prices(
         return await _load_prices(ticker, db)
 
     try:
-        df = await asyncio.to_thread(
-            yf.download, ticker, period=period, auto_adjust=True, progress=False
+        # wait_for setzt eine Obergrenze: bei einem hängenden Download gibt der
+        # Request Kontrolle zurück (der Hintergrund-Thread läuft noch aus, kann aber
+        # nicht hart abgebrochen werden) statt den Worker unbegrenzt zu blockieren.
+        df = await asyncio.wait_for(
+            asyncio.to_thread(
+                yf.download, ticker, period=period, auto_adjust=True, progress=False
+            ),
+            timeout=settings.yfinance_timeout,
         )
-    except Exception:
+    except asyncio.TimeoutError:
         # On a fetch failure fall back to whatever is cached (demo robustness).
+        logger.warning("yfinance-Download Timeout (%ss) für %s — nutze Cache",
+                       settings.yfinance_timeout, ticker)
+        return await _load_prices(ticker, db)
+    except Exception:
+        logger.warning("yfinance-Download fehlgeschlagen für %s — nutze Cache", ticker, exc_info=True)
         return await _load_prices(ticker, db)
 
     if df is None or df.empty:
@@ -113,8 +127,16 @@ async def fetch_and_store_fundamentals(
         return cached
 
     try:
-        info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
+        info = await asyncio.wait_for(
+            asyncio.to_thread(lambda: yf.Ticker(ticker).info),
+            timeout=settings.yfinance_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("yfinance-Fundamentals Timeout (%ss) für %s — nutze Cache",
+                       settings.yfinance_timeout, ticker)
+        return cached
     except Exception:
+        logger.warning("yfinance-Fundamentals fehlgeschlagen für %s — nutze Cache", ticker, exc_info=True)
         return cached
 
     if not info or info.get("regularMarketPrice") is None:
@@ -175,6 +197,7 @@ async def fetch_and_store_news(
                 resp = await client.get(url)
                 articles = resp.json() if resp.is_success else []
         except Exception:
+            logger.warning("Finnhub-News-Abruf fehlgeschlagen für %s", ticker, exc_info=True)
             articles = []
 
         existing_urls = {n.url for n in existing if n.url}

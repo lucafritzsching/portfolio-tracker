@@ -149,9 +149,10 @@ TOOL_DEFINITIONS = [
             "name": "judge_news",
             "description": ("Beurteilt anhand aktueller Schlagzeilen, ob eine Aktie ein FREITEXT-KRITERIUM "
                             "in Klarsprache erfüllt (Beispiele: hat aktuell eine Turnaround-Story; zuletzt "
-                            "gute News). Liefert ein geklammertes Urteil (matches, Signifikanz 0-5), "
-                            "Begründung, Belege und den Determinismus-Trace (regex-Basis vs. LLM). Nutze "
-                            "dies für News-/Sentiment-/Narrativ-Fragen in natürlicher Sprache."),
+                            "gute News). Liefert ein beleggebundenes Urteil (matches, Signifikanz 0-5), "
+                            "Begründung, zitierte Belege und einen Determinismus-Trace (llm_strength, "
+                            "finaler Wert, Quelle). Sektor-agnostisch, ohne starre Rubrik. Nutze dies für "
+                            "News-/Sentiment-/Narrativ-Fragen in natürlicher Sprache."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -386,6 +387,7 @@ class ToolExecutor:
             out = (_to_f(info.get("marketCap")), _to_f(info.get("revenueGrowth")),
                    _to_f(info.get("trailingPE")), info.get("shortName") or info.get("longName") or ticker)
         except Exception:
+            logger.warning("Fundamentals-Enrichment fehlgeschlagen für %s — None-Werte", ticker, exc_info=True)
             out = (None, None, None, ticker)
         self._fund_cache[ticker] = out
         return out
@@ -446,6 +448,7 @@ class ToolExecutor:
             info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
             name = info.get("shortName") or info.get("longName") or ""
         except Exception:
+            logger.warning("Firmenname-Abruf fehlgeschlagen für %s — leer", ticker, exc_info=True)
             name = ""
         self._name_cache[ticker] = name
         return name

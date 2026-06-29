@@ -103,6 +103,29 @@ export interface AgentStatus {
   error?: string
 }
 
+export interface AgentTraceStep {
+  step: number
+  tool: string
+  args: Record<string, unknown>
+  result: string
+}
+
+export interface AgentRunSummary {
+  id: number
+  question: string
+  answer: string
+  model: string
+  status: string
+  total_ms: number | null
+  eval_tokens: number | null
+  tokens_per_sec: number | null
+  created_at: string
+}
+
+export interface AgentRun extends AgentRunSummary {
+  trace: AgentTraceStep[]
+}
+
 export interface MetricRow {
   id: number
   ticker: string

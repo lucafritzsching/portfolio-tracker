@@ -1,8 +1,8 @@
-import re
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from config import settings
 from schemas import QuoteOut
+from utils import normalize_ticker
 
 INDUSTRY_MAP = {
     "Technology": "Technologie",
@@ -35,14 +35,10 @@ INDUSTRY_MAP = {
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
-SYMBOL_RE = re.compile(r"^[A-Z0-9.\^=\-]{1,20}$", re.IGNORECASE)
-
 
 @router.get("/{ticker}", response_model=QuoteOut)
 async def get_quote(ticker: str):
-    ticker = ticker.upper()
-    if not SYMBOL_RE.match(ticker):
-        raise HTTPException(400, "Ungültiges Ticker-Symbol")
+    ticker = normalize_ticker(ticker)
     if not settings.finnhub_api_key:
         raise HTTPException(500, "FINNHUB_API_KEY nicht konfiguriert")
 
@@ -92,6 +88,7 @@ async def get_quotes_batch(tickers: str = Query(..., description="Komma-getrennt
     async with httpx.AsyncClient(timeout=10) as client:
         for ticker in ticker_list:
             try:
+                ticker = normalize_ticker(ticker)  # skip malformed symbols (batch stays tolerant)
                 url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={settings.finnhub_api_key}"
                 resp = await client.get(url)
                 data = resp.json()
