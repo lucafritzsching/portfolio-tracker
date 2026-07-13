@@ -11,6 +11,7 @@ from services.finder import (
     load_fallback_universe,
     parse_mandate,
     rank_matches,
+    run_predefined_screen,
     run_screen,
 )
 from services.nl_target import NLVerdict
@@ -126,6 +127,32 @@ def test_run_screen_drops_rows_violating_market_cap_bounds():
     tickers = [c.ticker for c in candidates]
     assert "OK" in tickers and "NOMC" in tickers
     assert "BIG" not in tickers
+
+
+# ── predefined mover screens ─────────────────────────────────────────────────────
+
+def test_run_predefined_screen_maps_quote_rows():
+    def fake_screen():
+        return {"quotes": [
+            {"symbol": "nvda", "shortName": "NVIDIA", "regularMarketChangePercent": 5.2,
+             "regularMarketPrice": 130.0},
+            {"shortName": "Ohne Symbol"},                       # kein symbol → verworfen
+            {"symbol": "X", "longName": "X Corp"},              # fehlende Felder → None
+        ]}
+
+    rows = asyncio.run(run_predefined_screen("gainers", screen_fn=fake_screen))
+    assert rows[0] == {"ticker": "NVDA", "name": "NVIDIA", "change_pct": 5.2, "price": 130.0}
+    assert len(rows) == 2
+    assert rows[1]["ticker"] == "X" and rows[1]["change_pct"] is None
+
+
+def test_run_predefined_screen_unknown_kind_and_errors_return_empty():
+    assert asyncio.run(run_predefined_screen("kaputt")) == []
+
+    def boom():
+        raise RuntimeError("Yahoo down")
+
+    assert asyncio.run(run_predefined_screen("losers", screen_fn=boom)) == []
 
 
 # ── fallback universe ────────────────────────────────────────────────────────────

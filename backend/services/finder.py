@@ -243,6 +243,45 @@ async def run_screen(filters: dict, *, size: int = SCREEN_SIZE, screen_fn=None) 
     return candidates, "yfinance_screen"
 
 
+# ── 2b. Predefined mover screens (ticker-freie News-Discovery) ────────────────────
+
+# Yahoos vordefinierte Screens als deterministische Kandidaten-Quelle: „welche Firmen
+# hatten heute auffällige Bewegungen?" — die Ticker liefert der Screen, das Urteil
+# über die News fällt danach der beleggebundene NL-Judge (judge_news-Pfad).
+PREDEFINED_MOVER_SCREENS = {
+    "gainers": "day_gainers",
+    "losers": "day_losers",
+    "actives": "most_actives",
+}
+
+
+async def run_predefined_screen(kind: str, count: int = 10, *, screen_fn=None) -> list[dict]:
+    """Top-Mover von Yahoos vordefiniertem Screen. Fehler/unbekannter kind → [] (Caller meldet ehrlich).
+
+    Liefert [{ticker, name, change_pct, price}] — ``change_pct`` ist bereits in Prozent
+    (Feld ``regularMarketChangePercent``; live verifiziert mit yfinance 1.4.1).
+    """
+    screen_name = PREDEFINED_MOVER_SCREENS.get(kind)
+    if not screen_name:
+        return []
+    fn = screen_fn or (lambda: yf.screen(screen_name, count=count))
+    try:
+        res = await asyncio.to_thread(fn)
+    except Exception:
+        return []
+    quotes = res.get("quotes", []) if isinstance(res, dict) else []
+    return [
+        {
+            "ticker": str(q.get("symbol") or "").upper(),
+            "name": q.get("shortName") or q.get("longName") or q.get("symbol"),
+            "change_pct": _to_float(q.get("regularMarketChangePercent")),
+            "price": _to_float(q.get("regularMarketPrice")),
+        }
+        for q in quotes[:count]
+        if q.get("symbol")
+    ]
+
+
 # ── 3. Offline fallback universe (only when the live screen is unavailable) ───────
 
 def load_fallback_universe() -> list[ScreenCandidate]:

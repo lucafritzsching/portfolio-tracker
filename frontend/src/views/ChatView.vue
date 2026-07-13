@@ -175,14 +175,16 @@ function ask() {
     <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px">
       Stell eine Freitext-Frage. Der Agent wählt selbst das passende Werkzeug und macht die Tool-Aufrufe
       sichtbar: <strong>Strategie-Screen</strong> (Unternehmen finden), <strong>News-/Klarsprache-Urteil</strong>
-      (beleggebunden) oder <strong>statistische Modelle</strong> (ARIMA / Random Forest / Technik).
+      (beleggebunden), <strong>Mover-Discovery</strong> (auffällige Aktien ohne Ticker),
+      <strong>statistische Modelle</strong> (ARIMA / Random Forest / Technik) oder
+      <strong>Backtest</strong> (historische Signal-Güte vs. Buy&amp;Hold).
     </p>
 
     <div class="card" style="margin-bottom: 16px">
       <textarea
         v-model="question"
         rows="3"
-        placeholder="z. B. 'Finde Nasdaq-Biotech unter 15 Mrd. mit Turnaround' · 'ARIMA-Signal für TSLA?' · 'Hat AAPL zuletzt gute News?'"
+        placeholder="z. B. 'Finde Nasdaq-Biotech unter 15 Mrd. mit Turnaround' · 'ARIMA-Signal für TSLA?' · 'Hat AAPL zuletzt gute News?' · 'Welche Aktien sind heute mit guten News gestiegen?' · 'Wie zuverlässig war das Kaufsignal für AAPL?'"
         style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px; resize: vertical"
         :disabled="running"
         @keydown.ctrl.enter="ask"

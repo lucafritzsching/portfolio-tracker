@@ -22,7 +22,7 @@ from eval.backtest import run_backtest as run_backtest_eval
 from models import Position, Transaction, NewsCache
 from services.market_data import fetch_and_store_prices, prices_to_dicts, fetch_and_store_news
 from services.finder import (
-    DEFAULT_MAX_CANDIDATES, load_fallback_universe, parse_mandate, run_screen,
+    DEFAULT_MAX_CANDIDATES, load_fallback_universe, parse_mandate, run_predefined_screen, run_screen,
 )
 from services.nl_target import NLItem, evaluate_nl_target
 from services.event_strength import is_relevant
@@ -35,6 +35,18 @@ def _to_f(x):
         return None if x is None else float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _news_items(news) -> list[NLItem]:
+    """NewsCache-Zeilen → NLItems (Headline + Summary) für den NL-Judge."""
+    items = []
+    for n in news:
+        headline = (getattr(n, "headline", "") or "").strip()
+        summary = (getattr(n, "summary", "") or "").strip()
+        text = f"{headline}. {summary}".strip() if summary else headline
+        if text:
+            items.append(NLItem(text=text, source=getattr(n, "source", None)))
+    return items
 
 # ── Tool schemas for Ollama (OpenAI-compatible format) ───────────────────────
 
@@ -147,6 +159,33 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "discover_news_movers",
+            "description": ("Ticker-FREIE Entdeckung: Welche Aktien bewegen sich HEUTE auffällig "
+                            "(Tagesgewinner/-verlierer/meistgehandelt) und was sagen ihre News dazu? "
+                            "Deterministische Mover-Quelle (Yahoo-Screen) → beleggebundenes News-Urteil "
+                            "je Kandidat → rangierte Liste mit %-Bewegung und zitierten Schlagzeilen. "
+                            "Nutze dies, wenn der Nutzer KEINEN Ticker nennt und nach Movern/auffälligen "
+                            "News fragt (z. B. 'welche Aktien sind heute mit guten News gestiegen?')."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["gainers", "losers", "actives"],
+                        "description": "gainers = Tagesgewinner, losers = Tagesverlierer, actives = meistgehandelt",
+                    },
+                    "criterion": {
+                        "type": "string",
+                        "description": "Optionales Freitext-Kriterium für das News-Urteil (Default: kursrelevante News, die die Bewegung erklären)",
+                    },
+                },
+                "required": ["direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_backtest",
             "description": ("Walk-Forward-Backtest des deterministischen Ensemble-Signals für EIN "
                             "Ticker-Symbol: Wie oft traf BUY/HOLD/SELL historisch die 20-Tage-"
@@ -215,6 +254,7 @@ class ToolExecutor:
             "screen_by_strategy": self._screen_by_strategy,
             "judge_news": self._judge_news,
             "run_backtest": self._run_backtest,
+            "discover_news_movers": self._discover_news_movers,
         }
         handler = handlers.get(tool_name)
         if not handler:
@@ -490,13 +530,7 @@ class ToolExecutor:
                 "ticker": ticker, "criterion": criterion, "matches": False,
                 "message": "Keine aktuellen Schlagzeilen gefunden — keine NL-Beurteilung möglich.",
             }, ensure_ascii=False)
-        items = []
-        for n in news:
-            headline = (getattr(n, "headline", "") or "").strip()
-            summary = (getattr(n, "summary", "") or "").strip()
-            text = f"{headline}. {summary}".strip() if summary else headline
-            if text:
-                items.append(NLItem(text=text, source=getattr(n, "source", None)))
+        items = _news_items(news)
         name = await self._company_name(ticker)
         verdict = await evaluate_nl_target(criterion, items, ticker=ticker, name=name, mode="fast")
         return json.dumps({
@@ -513,6 +547,46 @@ class ToolExecutor:
                 "source": verdict.source,
             },
             "headlines_checked": len(items),
+        }, ensure_ascii=False)
+
+    DISCOVER_JUDGE_LIMIT = 5   # wie viele Mover den NL-Judge erreichen (Compute-Budget, ~5-8s je Urteil)
+
+    async def _discover_news_movers(self, direction: str = "gainers", criterion: str = "") -> str:
+        """Ticker-freie News-Discovery: deterministische Mover-Quelle → beleggebundenes NL-Urteil.
+
+        `is_relevant` kann nicht rückwärts entdecken (braucht immer einen Kandidaten) — deshalb
+        liefert der Yahoo-Mover-Screen die Kandidaten, und erst DANACH urteilt der NL-Judge über
+        deren News (dieselbe Grounding-Garantie wie judge_news: nur echte Schlagzeilen zählen).
+        """
+        movers = await run_predefined_screen(direction, count=10)
+        if not movers:
+            return json.dumps({
+                "error": f"Mover-Screen '{direction}' nicht verfügbar (Yahoo nicht erreichbar oder unbekannte Richtung).",
+            }, ensure_ascii=False)
+
+        crit = (criterion or "").strip() or "aktuelle kursrelevante Nachrichten, die die Kursbewegung erklären"
+        judged = []
+        for m in movers[: self.DISCOVER_JUDGE_LIMIT]:
+            news = await fetch_and_store_news(m["ticker"], self.db, days=7)
+            items = _news_items(news)
+            if items:
+                v = await evaluate_nl_target(crit, items, ticker=m["ticker"], name=m["name"] or "", mode="fast")
+                judged.append({**m, "matches": v.matches, "significance": v.strength,
+                               "reason": v.reason, "evidence": v.evidence[:2]})
+            else:
+                judged.append({**m, "matches": False, "significance": 0,
+                               "reason": "Keine unternehmensspezifischen Schlagzeilen gefunden.",
+                               "evidence": []})
+        judged.sort(key=lambda r: (r["matches"], r["significance"], abs(r["change_pct"] or 0)), reverse=True)
+
+        return json.dumps({
+            "direction": direction,
+            "criterion": crit,
+            "source": "yahoo_predefined_screen",
+            "candidates": judged,
+            "weitere_ticker_ungeprueft": [m["ticker"] for m in movers[self.DISCOVER_JUDGE_LIMIT:]],
+            "hinweis": ("Urteile sind beleggebunden (evidence = echte Schlagzeilen). Kandidaten ohne "
+                        "matches haben keine belegbaren News zum Kriterium — %-Bewegung trotzdem nennen."),
         }, ensure_ascii=False)
 
     async def _run_backtest(self, ticker: str) -> str:

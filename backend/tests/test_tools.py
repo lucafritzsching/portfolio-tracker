@@ -203,6 +203,55 @@ def test_screen_marks_unchecked_growth_and_ranks_by_growth(monkeypatch):
     assert "revenue_growth_unchecked" not in by_ticker["FAST"]
 
 
+def _fake_movers(n=10):
+    return [{"ticker": f"T{i}", "name": f"Firma {i}", "change_pct": float(10 - i), "price": 10.0 + i}
+            for i in range(n)]
+
+
+def test_discover_news_movers_judges_bounded_and_ranks(monkeypatch):
+    """Max. DISCOVER_JUDGE_LIMIT Kandidaten erreichen den NL-Judge; Treffer ranken vor
+    Nicht-Treffern; der Rest wird als ungeprüft ausgewiesen (kein stilles Kappen)."""
+    judged = []
+
+    class _News:
+        headline, summary, source = "Big News", "", "Wire"
+
+    async def fake_screen(kind, count=10):
+        assert kind == "gainers"
+        return _fake_movers(10)
+
+    async def fake_news(ticker, db, days=7):
+        return [] if ticker == "T0" else [_News()]   # T0: keine News → unmatched, aber enthalten
+
+    async def fake_eval(criterion, items, ticker="", name="", mode="fast"):
+        judged.append(ticker)
+        # T2 ist der stärkste Treffer, T1 schwächer, Rest kein Match.
+        strength = {"T2": 5, "T1": 4}.get(ticker, 1)
+        return NLVerdict(matches=ticker in ("T1", "T2"), strength=strength, reason="ok",
+                         evidence=["Big News"] if ticker in ("T1", "T2") else [],
+                         source="llm", llm_strength=strength)
+
+    monkeypatch.setattr("agent.tools.run_predefined_screen", fake_screen)
+    monkeypatch.setattr("agent.tools.fetch_and_store_news", fake_news)
+    monkeypatch.setattr("agent.tools.evaluate_nl_target", fake_eval)
+    out = json.loads(_run(_ex().execute("discover_news_movers", {"direction": "gainers"})))
+
+    assert len(judged) == 4                          # 5er-Limit minus T0 (keine News → kein Judge-Call)
+    assert len(out["candidates"]) == 5
+    assert [c["ticker"] for c in out["candidates"]][:2] == ["T2", "T1"]   # Treffer zuerst, stärkster oben
+    assert out["candidates"][0]["evidence"] == ["Big News"]
+    assert out["weitere_ticker_ungeprueft"] == ["T5", "T6", "T7", "T8", "T9"]
+    assert out["criterion"]                          # Default-Kriterium wurde gesetzt
+
+
+def test_discover_news_movers_empty_screen_is_honest_error(monkeypatch):
+    async def empty(kind, count=10):
+        return []
+    monkeypatch.setattr("agent.tools.run_predefined_screen", empty)
+    out = json.loads(_run(_ex().execute("discover_news_movers", {"direction": "losers"})))
+    assert "error" in out
+
+
 def test_get_news_drops_off_topic_headlines(monkeypatch):
     """Finnhub's company-news feed can include market-wide/off-topic articles under a ticker
     (Uniswap/Roku under AAPL); _get_news keeps only headlines that mention the company."""
