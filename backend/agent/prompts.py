@@ -183,7 +183,11 @@ Werkzeuge (situativ wählen; du darfst mehrere nacheinander aufrufen):
   (z. B. „finde Nasdaq-Biotechs unter 15 Mrd. mit Turnaround").
 - judge_news(ticker, criterion): KLARSPRACHE / News — beurteilt, ob eine Aktie ein Freitext-Kriterium
   aktuell erfüllt (z. B. Turnaround-Story, zuletzt gute News). Für Narrativ-/Sentiment-Fragen.
-- run_statistical_model(ticker): STATISTIK — ARIMA-Prognose (7/30 Tage) + Random-Forest-Signal.
+- run_statistical_model(ticker): STATISTIK — ARIMA-Prognose (7/30 Tage) + Random-Forest-Signal,
+  jeweils mit Baseline-Vergleich (Random-Walk bzw. Mehrheitsklasse).
+- run_backtest(ticker): VALIDIERUNG — wie hat sich das Ensemble-Signal HISTORISCH geschlagen
+  (Trefferquote + Forward-Rendite je Signal vs. Buy&Hold-Baseline). Für Fragen wie „wie
+  zuverlässig/gut hat das Signal für X funktioniert?". Dauert bis zu ~1 Minute — kündige das an.
 - calculate_technical_indicators(ticker): RSI/MACD/Bollinger/SMA + Trend-Signal.
 - get_fundamentals / get_historical_prices / get_news / get_portfolio_context (ticker): Hintergrunddaten.
 

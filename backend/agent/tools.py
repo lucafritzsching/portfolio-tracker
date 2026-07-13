@@ -18,6 +18,7 @@ from agent.data_science import (
     run_arima_forecast,
     run_ml_signal,
 )
+from eval.backtest import run_backtest as run_backtest_eval
 from models import Position, Transaction, NewsCache
 from services.market_data import fetch_and_store_prices, prices_to_dicts, fetch_and_store_news
 from services.finder import (
@@ -146,6 +147,25 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "run_backtest",
+            "description": ("Walk-Forward-Backtest des deterministischen Ensemble-Signals für EIN "
+                            "Ticker-Symbol: Wie oft traf BUY/HOLD/SELL historisch die 20-Tage-"
+                            "Forward-Rendite, verglichen mit der Buy&Hold-Baseline aller Fenster? "
+                            "Nutze dies für Fragen nach der ZUVERLÄSSIGKEIT/Güte des Signals "
+                            "(z. B. 'wie gut hat das Kaufsignal für AAPL funktioniert?'). "
+                            "Dauert ca. 20-60 Sekunden."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Ticker-Symbol"},
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "judge_news",
             "description": ("Beurteilt anhand aktueller Schlagzeilen, ob eine Aktie ein FREITEXT-KRITERIUM "
                             "in Klarsprache erfüllt (Beispiele: hat aktuell eine Turnaround-Story; zuletzt "
@@ -194,6 +214,7 @@ class ToolExecutor:
             "get_portfolio_context": self._get_portfolio_context,
             "screen_by_strategy": self._screen_by_strategy,
             "judge_news": self._judge_news,
+            "run_backtest": self._run_backtest,
         }
         handler = handlers.get(tool_name)
         if not handler:
@@ -492,6 +513,20 @@ class ToolExecutor:
                 "source": verdict.source,
             },
             "headlines_checked": len(items),
+        }, ensure_ascii=False)
+
+    async def _run_backtest(self, ticker: str) -> str:
+        """Walk-Forward-Backtest für EIN Ticker (step=10 statt 5: halbe Fensterzahl → Chat-taugliche
+        Laufzeit). Jedes Fenster fittet ARIMA+RF — das läuft im Eval-Modul via to_thread."""
+        ticker = ticker.upper()
+        res = await run_backtest_eval(self.db, [ticker], horizon_days=20, step_days=10)
+        return json.dumps({
+            "ticker": ticker,
+            "params": res["params"],
+            "results": res["per_ticker"].get(ticker, {}),
+            "hinweis": ("Signal je Fenster vs. 20-Tage-Forward-Rendite; 'baseline' = Buy&Hold über "
+                        "ALLE Fenster — BUY ist nur gut, wenn es die Baseline schlägt. Kleine n → "
+                        "nicht signifikant, als Tendenz formulieren."),
         }, ensure_ascii=False)
 
     async def _fetch_prices(self, ticker: str, period: str) -> list[dict]:

@@ -23,6 +23,29 @@ def _ex():
 def test_new_tools_registered():
     names = [d["function"]["name"] for d in TOOL_DEFINITIONS]
     assert "screen_by_strategy" in names and "judge_news" in names
+    assert "run_backtest" in names
+
+
+def test_run_backtest_tool_shape(monkeypatch):
+    async def fake_backtest(db, tickers, horizon_days=20, step_days=5):
+        assert tickers == ["AAPL"] and step_days == 10
+        return {
+            "params": {"horizon_days": horizon_days, "step_days": step_days, "min_history": 120},
+            "per_ticker": {"AAPL": {
+                "BUY": {"n": 4, "avg_return_pct": 1.2, "hit_rate": 0.75},
+                "HOLD": {"n": 10, "avg_return_pct": 0.4, "hit_rate": 0.5},
+                "SELL": {"n": 2, "avg_return_pct": -0.8, "hit_rate": 0.5},
+                "baseline": {"n": 16, "avg_return_pct": 0.5, "hit_rate": 0.56},
+            }},
+            "aggregate": {},
+        }
+
+    monkeypatch.setattr("agent.tools.run_backtest_eval", fake_backtest)
+    out = json.loads(_run(_ex().execute("run_backtest", {"ticker": "aapl"})))
+    assert out["ticker"] == "AAPL"
+    assert out["results"]["baseline"]["n"] == 16
+    assert out["results"]["BUY"]["hit_rate"] == 0.75
+    assert "Buy&Hold" in out["hinweis"]
 
 
 def test_execute_unknown_tool_returns_error():
