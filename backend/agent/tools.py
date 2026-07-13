@@ -489,7 +489,11 @@ class ToolExecutor:
         }, ensure_ascii=False)
 
     async def _fetch_prices(self, ticker: str, period: str) -> list[dict]:
-        """Fetch prices via the shared service, cached per analysis to avoid repeat work."""
+        """Fetch prices via the shared service, cached per analysis to avoid repeat work.
+
+        Nur nach Ticker gekeyt: der Service lädt nie kürzer als 2y (Superset), d. h. ein
+        vorheriger "1mo"-Abruf kann einem späteren "2y"-Abruf keine Daten wegnehmen.
+        """
         ticker = ticker.upper()
         if ticker in self._price_cache:
             return self._price_cache[ticker]
