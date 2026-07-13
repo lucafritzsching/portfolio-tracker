@@ -193,7 +193,20 @@ async def _run_agent_loop(
         logger.info("Agent-Loop It. %d: %d Tool-Call(s)%s", iteration, len(tool_calls),
                     "" if tool_calls else " → finale Antwort")
         if not tool_calls:
-            if stream_final:
+            # Die finale Antwort wurde in DIESEM Call bereits generiert — direkt ausliefern,
+            # statt sie zu verwerfen und per zweitem Ollama-Call neu zu erzeugen (halbiert
+            # die Latenz der Schlussphase auf dem lokalen 14B-Modell).
+            content = message.get("content", "")
+            if content.strip():
+                if stats is not None:
+                    stats.update(data)
+                if stream_final:
+                    chunk_size = 120
+                    for i in range(0, len(content), chunk_size):
+                        yield content[i : i + chunk_size]
+                else:
+                    yield content
+            elif stream_final:
                 async for token in _stream_ollama_response(messages, stats):
                     yield token
             else:
