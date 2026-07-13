@@ -100,13 +100,13 @@ Open http://localhost:5173
 | `backend/routers/agent.py` | **SSE agent endpoints** — primary `/api/agent/ask` (unified router) + status/pull-model (analyze/chat/rebalance/news kept, not in UI) |
 | `backend/routers/eval.py` | Eval metrics + ensemble backtest |
 | `backend/agent/orchestrator.py` | **`ask_stream` router** (Ollama tool-calling, visible 🔧-trace) + Alt-A pipeline (evidence-gated explanation) |
-| `backend/agent/tools.py` | Tools + ToolExecutor: `screen_by_strategy`, `judge_news`, `run_statistical_model`, technicals, fundamentals, news (+ logging) |
-| `backend/services/finder.py` | Strategy screen: mandate → LLM parse → yfinance `EquityQuery`/`screen` (+ fallback universe) |
+| `backend/agent/tools.py` | Tools + ToolExecutor: `screen_by_strategy`, `judge_news`, `discover_news_movers` (ticker-free mover discovery), `run_backtest` (signal quality vs. buy&hold), `run_statistical_model`, technicals, fundamentals, news (+ logging) |
+| `backend/services/finder.py` | Strategy screen: mandate → LLM parse → yfinance `EquityQuery`/`screen` (+ fallback universe); predefined mover screens (`run_predefined_screen`) |
 | `backend/services/nl_target.py` | **Sector-agnostic** NL judge: relevance + subject-focus + **evidence-grounding** (no biotech rubric/clamp) |
-| `backend/agent/data_science.py` | Technical indicators, ARIMA (interval confidence), RandomForest (current-bar + OOS accuracy) |
+| `backend/agent/data_science.py` | Technical indicators, ARIMA (interval confidence + optional MAE vs. random-walk baseline), RandomForest (current-bar, purged holdout vs. majority baseline, class_weight=balanced) |
 | `backend/agent/evidence.py` | Evidence catalog + `{{ev:id}}` render (Alt-A anti-hallucination) |
 | `backend/eval/faithfulness.py` | Sentence-level faithfulness gate (Alt-A) |
-| `backend/eval/backtest.py` | Walk-forward backtest of ensemble signals |
+| `backend/eval/backtest.py` | Walk-forward backtest of ensemble signals (pure `backtest_prices` + buy&hold baseline row) |
 | `backend/agent/prompts.py` | German prompt templates (incl. `ROUTER_SYSTEM_PROMPT`) |
 
 ## Frontend Structure
@@ -147,17 +147,21 @@ Open http://localhost:5173
 
 ## Agent Architecture
 
-**Refactored to ONE routing chat agent** (see ADR-16/17 in [docs/07](docs/07-entscheidungslog.md),
+**Refactored to ONE routing chat agent** (see ADR-16/17/18 in [docs/07](docs/07-entscheidungslog.md),
 [docs/12-data-science-methodik.md](docs/12-data-science-methodik.md), Flowchart 8 in
 [docs/refactor_flowcharts.md](docs/refactor_flowcharts.md)):
 1. Frontend (ChatView) opens **GET** `/api/agent/ask?question=…` → SSE stream
-2. `orchestrator.ask_stream` runs an Ollama tool-loop (`_run_agent_loop`, temp 0, visible 🔧 tool-trace)
+2. `orchestrator.ask_stream` runs an Ollama tool-loop (`_run_agent_loop`, temp 0, visible 🔧 tool-trace);
+   the final answer is delivered straight from the loop response (no second generation call)
 3. The LLM routes to the right tool:
    - `screen_by_strategy(mandate)` — deterministic yfinance screen (`services/finder.py`)
    - `judge_news(ticker, criterion)` — sector-agnostic NL judge, relevance + **evidence-grounding** (`services/nl_target.py`)
+   - `discover_news_movers(direction, criterion?)` — ticker-free discovery: Yahoo mover screen → NL judge per candidate (max 5)
+   - `run_backtest(ticker)` — walk-forward signal quality vs. **buy&hold baseline** (`eval/backtest.py`)
    - `run_statistical_model` / `calculate_technical_indicators` — ARIMA + RandomForest + technicals (`agent/data_science.py`)
 4. Final turn synthesizes a grounded German explanation; tool calls + tracebacks are logged (`"agent"` logger)
-5. Anti-hallucination: NL = must cite **real** headlines; statistics = deterministic + honest (interval confidence, OOS accuracy)
+5. Anti-hallucination: NL = must cite **real** headlines; statistics = deterministic + honest
+   (interval confidence, purged-holdout OOS accuracy, baselines: majority class / random walk / buy&hold)
 
 The deterministic **Alt-A hybrid pipeline** (`compute_ensemble` → BUY/HOLD/SELL, evidence-gated explanation,
 faithfulness gate; `analyze_stock_stream`) still exists in the codebase but is no longer wired to the UI.

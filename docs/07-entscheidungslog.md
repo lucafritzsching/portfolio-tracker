@@ -215,6 +215,38 @@ erfundene Schlagzeile zitieren) statt einer sektorspezifischen Heuristik.
 News-Feeds bleiben verrauscht (tangentiale Erwähnungen möglich, durch Relevanz + Fokus gemindert). Ausblick:
 `auto_arima`, RF mit `TimeSeriesSplit`-CV + persistiertem Modell, größeres Backtest-Universum.
 
+## ADR-18 – Baselines überall, purged Split, zwei neue Chat-Tools, Cache-Härtung
+**Kontext:** Bewertungskriterium der Abschlusspräsentation: Modelle **und** Trading-Mechanismus müssen
+gegen **sinnvolle Baselines** verglichen werden. Zudem vier Robustheits-Defekte: (1) die finale
+Agent-Antwort wurde **doppelt generiert** (Loop-Ergebnis verworfen, zweiter Ollama-Call → ~2× Latenz der
+Schlussphase); (2) ein Refresh mit kurzem Zeitraum (LLM-gewähltes `period="1mo"`) **löschte die
+2y-Kurshistorie** (delete+insert) und ließ die Statistik-Modelle verhungern; (3) der News-Cache maß
+Frische am `published_at` des neuesten Artikels (< 1 h praktisch nie wahr) → **jeder Aufruf refetchte
+Finnhub**; (4) redundante `yf.info`-Calls pro Lauf. Außerdem trainierte der RF die letzten 20 Zeilen
+(Zukunft unbekannt) still als Default-HOLD mit.
+**Entscheidung (DS-Baselines):** Jede Modell-Ebene bekommt ihren Maßstab: **RF** Holdout-Accuracy vs.
+**Mehrheitsklassen-Baseline** (purged Holdout mit 20-Tage-Gap = Label-Horizont gegen Label-Leakage,
+`class_weight="balanced"`, Label-Fix); **ARIMA** 30T-Holdout-MAE vs. **naive Random-Walk-Baseline**
+(opt-in `validate=True`, nur im Statistik-Tool/Quick-Stats — der Backtest bliebe sonst ~2× langsamer);
+**Backtest** je Signal vs. **Buy&Hold-Basisrate aller Fenster** (`baseline`-Zeile, pure Funktion
+`backtest_prices` via `to_thread`).
+**Entscheidung (Tools):** Zwei neue Werkzeuge im Router-Loop: **`run_backtest(ticker)`** (historische
+Signal-Güte im Chat, step=10) und **`discover_news_movers(direction, criterion?)`** — die ticker-freie
+News-Discovery aus dem Ausblick von [00-gesamtanalyse.md](00-gesamtanalyse.md): deterministischer
+Yahoo-Mover-Screen (day_gainers/losers/most_actives) liefert Kandidaten, dann urteilt der beleggebundene
+NL-Judge über deren News (max. 5 Kandidaten ans LLM, Rest als `weitere_ticker_ungeprueft` ausgewiesen).
+**Entscheidung (Robustheit):** Finale Antwort direkt aus dem Loop-Response (chunked, kein zweiter Call);
+Preis-Downloads nie kürzer als 2y (Superset); News-TTL über prozess-lokalen Fetch-Timestamp (NewsCache
+hat keine `fetched_at`-Spalte, keine Migrationen — Neustart kostet einen Refetch je Ticker); ein
+gemeinsamer `_yf_info`-Cache pro Lauf.
+**Begründung:** Baselines machen die „ehrliche DS"-Linie (ADR-17) messbar statt nur erzählbar; die neuen
+Tools nutzen ausschließlich vorhandene, getestete Bausteine (Backtest-Modul, NL-Judge, Screen-Infrastruktur)
+— deterministische Quelle → LLM-Urteil bleibt das Grundmuster.
+**Konsequenz / Trade-off:** `class_weight="balanced"` **verschiebt Live-RF-Signale** (weniger
+Mehrheits-HOLD) → Demo-Zahlen vor der Präsentation neu erheben; Antworten ohne Tool-Nutzung erscheinen
+als schnelle Text-Bursts statt Token-Streaming (bewusst: schneller); die Mover-Discovery hängt an Yahoos
+vordefinierten Screens (Fehler → ehrliche Fehler-JSON, kein Fallback-Raten).
+
 ---
 
 ## Behobene Bugs aus dem Code-Review (Baseline)

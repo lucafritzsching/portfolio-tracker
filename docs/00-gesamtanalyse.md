@@ -59,16 +59,22 @@ Bewusst variiert wird **nur der Ziel-Typ** — und damit, **wo** das LLM sitzt (
 - ❌ **Nicht getestet:** Trading-Performance/Renditen, statistische Repräsentativität (n=18), modusübergreifender Determinismus.
 *(Details + Musterantworten: [refactor_validation.md](refactor_validation.md), [refactor_flowcharts.md](refactor_flowcharts.md) → Flowchart 5.)*
 
+## Umgesetzt seit dem Refactor (ADR-18)
+- ✅ **Ticker-freie News-Discovery** ist jetzt das Chat-Tool **`discover_news_movers`**: deterministische
+  Mover-Quelle (Yahoos vordefinierte Screens: Tagesgewinner/-verlierer/Most-Active) liefert Kandidaten →
+  beleggebundener NL-Judge je Kandidat → rangierte Liste mit %-Bewegung + zitierter Schlagzeile
+  (max. 5 Kandidaten ans LLM, Rest explizit als ungeprüft ausgewiesen).
+- ✅ **Backtest im Chat** (`run_backtest`): historische Signal-Güte je Ticker vs. **Buy&Hold-Baseline**.
+- ✅ **Baselines in allen Modellen:** RF-Holdout vs. Mehrheitsklasse (purged 20T-Gap-Split,
+  `class_weight=balanced`, Label-Fix), ARIMA-MAE vs. Random Walk, Backtest vs. Buy&Hold —
+  [12-data-science-methodik.md](12-data-science-methodik.md).
+- ✅ **Robustheit:** finale Agent-Antwort ohne doppelte Generierung; Preis-Historie kann nicht mehr durch
+  kurze Zeiträume schrumpfen; News-TTL am Fetch-Zeitpunkt; ein `yf.info` pro Lauf.
+
 ## Ausblick (nächste Schritte)
 - `think:false`-Fix evaluieren (Re-Run) → fast-Genauigkeit + Latenz quantifizieren.
 - Decision-Trace tiefer in den NL-Agent ziehen; Regex-vs-LLM-Divergenz als explizite Metrik.
 - Weitere NL-Quellen (Reddit) hinter `NLItem`; Multi-Agent (Achse C) als dokumentierte Zukunft.
-- **Ticker-freie News-Discovery** („welche Firmen hatten zuletzt besonders gute Reports/News?", ohne
-  Ticker im Prompt): `is_relevant` kann *nicht* rückwärts entdecken (es braucht immer einen Kandidaten),
-  und Finnhubs allgemeiner Feed liefert keine `related`-Ticker. Geplanter Weg: eine **deterministische
-  Mover-Quelle** (yfinance Tagesgewinner/Most-Active) als Kandidaten → bestehendes **`judge_news`** je
-  Kandidat (beleggebunden) → rangierte Liste mit %-Bewegung + zitierter Schlagzeile. Bewusst **nach** der
-  Demo (neue Funktionalität = Demo-Risiko).
 
 ## Demo-Ablauf (Vorschlag für die Präsentation)
 > **Aktualisiert (Refactor, ADR-16/17):** Es gibt nur noch **ein Chat-Fenster (KI-Agent)**, das je nach
