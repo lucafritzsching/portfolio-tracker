@@ -40,39 +40,43 @@ decision log/ADRs ([07](docs/07-entscheidungslog.md)), API reference ([08](docs/
 Full-stack local webapp. The old `index.html` prototype is kept as reference only.
 
 ```
-frontend/    Vue 3 + TypeScript + Vite   → localhost:5173 (local, npm run dev)
-backend/     Python FastAPI (Docker)     → localhost:8000 (container portfaio-backend)
+frontend/    Vue 3 + TypeScript + Vite   → localhost:5173
+backend/     Python FastAPI              → localhost:8000
              PostgreSQL (Docker)         → localhost:5432
-             Ollama (NATIVE on host)     → localhost:11434
+             Ollama (native host)        → localhost:11434
 ```
 
 ## Starting the App
 
-### 1. Start PostgreSQL + backend (Docker)
-```bash
-cp backend/.env.example backend/.env   # once; add FINNHUB_API_KEY
-docker-compose up -d
-```
-The backend runs in the `portfaio-backend` container (Python 3.12, `uvicorn --reload`,
-`./backend` mounted to `/app` → code changes hot-reload). Logs:
-```bash
-docker logs -f portfaio-backend
-```
-Compose overrides `DATABASE_URL` (host `postgres`) and `OLLAMA_BASE_URL`
-(`host.docker.internal`) for the container; the rest comes from `backend/.env`.
+> **Ollama runs natively on the host, not in Docker.** On macOS a container is CPU-only
+> (no Metal/GPU passthrough) and far too slow/heavy for a 14B model, so `docker-compose`
+> starts **only PostgreSQL** (plus an optional backend container). A native backend reaches
+> Ollama at `localhost:11434`; the backend *container* reaches it via `host.docker.internal:11434`.
 
-### 2. Ollama (native on host, first time only)
-Ollama runs **natively**, not in Docker (a macOS container would be CPU-only; native uses
-the Metal GPU — see comments in `docker-compose.yml`). The backend container reaches it
-via `host.docker.internal`.
+### 1. Start PostgreSQL (Docker)
 ```bash
-ollama pull qwen3:14b
-# or via the UI: KI-Analyse → "Modell laden"
+docker-compose up -d postgres
+```
+
+### 2. Start Ollama + pull the model (native, first time only)
+```bash
+# install once from https://ollama.com/download  (or: brew install ollama)
+ollama serve            # skip if Ollama already runs as a background app/service
+ollama pull qwen3:14b   # or via the UI: KI-Analyse → "Modell laden"
 ```
 Default model is `qwen3:14b` (see `backend/config.py`; needs ~9 GB on 16 GB Apple Silicon).
 Fallback for low-RAM machines: set `OLLAMA_MODEL=qwen2.5:7b` in `backend/.env`.
 
-### 3. Start Vue frontend
+### 3. Start FastAPI backend
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate  # once
+pip install -r requirements.txt                      # once
+cp .env.example .env                                 # add FINNHUB_API_KEY
+uvicorn main:app --reload
+```
+
+### 4. Start Vue frontend
 ```bash
 cd frontend
 npm install   # once
@@ -80,14 +84,6 @@ npm run dev
 ```
 
 Open http://localhost:5173
-
-### Tests & gotchas
-- `backend/.venv` is **Python 3.9** and is only for `pytest tests/` — it cannot load the
-  app itself (PEP-604 `X | Y` annotations in `models.py` need 3.10+). Run the app via Docker.
-- `init_db()` only does `create_all` — it never alters existing tables. After a schema
-  change, drop the affected table in the Postgres container
-  (`docker exec -it portfaio-postgres psql -U portfaio -d portfaio -c 'DROP TABLE …;'`);
-  the backend recreates it on restart.
 
 ## Backend Structure
 
@@ -101,15 +97,17 @@ Open http://localhost:5173
 | `backend/routers/portfolio.py` | CRUD for positions, transactions, savings plans; `/import` for localStorage migration |
 | `backend/routers/quotes.py` | Finnhub stock price proxy |
 | `backend/routers/market_data.py` | Historical prices, fundamentals, news (yfinance + Finnhub) |
-| `backend/routers/agent.py` | **SSE streaming agent** `/api/agent/analyze/{ticker}` (+ chat, rebalance, news) |
+| `backend/routers/agent.py` | **SSE agent endpoints** — primary `/api/agent/ask` (unified router) + status/pull-model (analyze/chat/rebalance/news kept, not in UI) |
 | `backend/routers/eval.py` | Eval metrics + ensemble backtest |
-| `backend/agent/orchestrator.py` | Hybrid agent: pipeline → evidence-gated LLM explanation |
-| `backend/agent/evidence.py` | Evidence catalog + `{{ev:id}}` render (anti-hallucination) |
-| `backend/eval/faithfulness.py` | Sentence-level faithfulness gate |
-| `backend/eval/backtest.py` | Walk-forward backtest of ensemble signals |
-| `backend/agent/tools.py` | Tool definitions (Qwen tool-calling format) + ToolExecutor |
-| `backend/agent/data_science.py` | Technical indicators, ARIMA forecast, Random Forest signal |
-| `backend/agent/prompts.py` | German prompt templates |
+| `backend/agent/orchestrator.py` | **`ask_stream` router** (Ollama tool-calling, visible 🔧-trace) + Alt-A pipeline (evidence-gated explanation) |
+| `backend/agent/tools.py` | Tools + ToolExecutor: `screen_by_strategy`, `judge_news`, `discover_news_movers` (ticker-free mover discovery), `run_backtest` (signal quality vs. buy&hold), `run_statistical_model`, technicals, fundamentals, news (+ logging) |
+| `backend/services/finder.py` | Strategy screen: mandate → LLM parse → yfinance `EquityQuery`/`screen` (+ fallback universe); predefined mover screens (`run_predefined_screen`) |
+| `backend/services/nl_target.py` | **Sector-agnostic** NL judge: relevance + subject-focus + **evidence-grounding** (no biotech rubric/clamp) |
+| `backend/agent/data_science.py` | Technical indicators, ARIMA (interval confidence + optional MAE vs. random-walk baseline), RandomForest (current-bar, purged holdout vs. majority baseline, class_weight=balanced) |
+| `backend/agent/evidence.py` | Evidence catalog + `{{ev:id}}` render (Alt-A anti-hallucination) |
+| `backend/eval/faithfulness.py` | Sentence-level faithfulness gate (Alt-A) |
+| `backend/eval/backtest.py` | Walk-forward backtest of ensemble signals (pure `backtest_prices` + buy&hold baseline row) |
+| `backend/agent/prompts.py` | German prompt templates (incl. `ROUTER_SYSTEM_PROMPT`) |
 
 ## Frontend Structure
 
@@ -119,8 +117,7 @@ Open http://localhost:5173
 | `frontend/src/api/client.ts` | Typed fetch wrappers for all backend endpoints + EventSource for SSE |
 | `frontend/src/stores/portfolio.ts` | Pinia store: positions, transactions, savings plans, stats |
 | `frontend/src/stores/ui.ts` | Pinia store: active view, modals |
-| `frontend/src/views/AnalysisView.vue` | **Main feature**: KI-Analyse with SSE streaming |
-| `frontend/src/views/ChatView.vue` | KI-Chat (free-text, tool agent) |
+| `frontend/src/views/ChatView.vue` | **The single agent window** ("KI-Agent"): free-text → routes to screen/NL/statistics tools (SSE, visible tool-trace) + setup controls |
 | `frontend/src/views/EvalView.vue` | Agent metrics + ensemble backtest |
 | `frontend/src/views/DashboardView.vue` | Metrics, charts, positions table |
 | `frontend/src/views/PositionsView.vue` | Position cards, transaction history, transaction modal |
@@ -150,12 +147,24 @@ Open http://localhost:5173
 
 ## Agent Architecture
 
-Hybrid agent (see [docs/03-agent-design.md](docs/03-agent-design.md), [docs/09-release-v2.0-baseline.md](docs/09-release-v2.0-baseline.md)):
-1. Frontend opens **GET** `/api/agent/analyze/{ticker}?current_prices=…` → SSE stream
-2. Phase 1+2: deterministic pipeline → BUY/HOLD/SELL + score (no LLM)
-3. Phase 3 (optional, `agentic=true`): tool loop with visible tool calls
-4. Phase 4: LLM explains using `{{ev:id}}` placeholders → evidence render → faithfulness gate → SSE chunks
-5. NO_DATA abort if no price history (no fabricated recommendation)
+**Refactored to ONE routing chat agent** (see ADR-16/17/18 in [docs/07](docs/07-entscheidungslog.md),
+[docs/12-data-science-methodik.md](docs/12-data-science-methodik.md), Flowchart 8 in
+[docs/refactor_flowcharts.md](docs/refactor_flowcharts.md)):
+1. Frontend (ChatView) opens **GET** `/api/agent/ask?question=…` → SSE stream
+2. `orchestrator.ask_stream` runs an Ollama tool-loop (`_run_agent_loop`, temp 0, visible 🔧 tool-trace);
+   the final answer is delivered straight from the loop response (no second generation call)
+3. The LLM routes to the right tool:
+   - `screen_by_strategy(mandate)` — deterministic yfinance screen (`services/finder.py`)
+   - `judge_news(ticker, criterion)` — sector-agnostic NL judge, relevance + **evidence-grounding** (`services/nl_target.py`)
+   - `discover_news_movers(direction, criterion?)` — ticker-free discovery: Yahoo mover screen → NL judge per candidate (max 5)
+   - `run_backtest(ticker)` — walk-forward signal quality vs. **buy&hold baseline** (`eval/backtest.py`)
+   - `run_statistical_model` / `calculate_technical_indicators` — ARIMA + RandomForest + technicals (`agent/data_science.py`)
+4. Final turn synthesizes a grounded German explanation; tool calls + tracebacks are logged (`"agent"` logger)
+5. Anti-hallucination: NL = must cite **real** headlines; statistics = deterministic + honest
+   (interval confidence, purged-holdout OOS accuracy, baselines: majority class / random walk / buy&hold)
+
+The deterministic **Alt-A hybrid pipeline** (`compute_ensemble` → BUY/HOLD/SELL, evidence-gated explanation,
+faithfulness gate; `analyze_stock_stream`) still exists in the codebase but is no longer wired to the UI.
 
 ## Environment Variables (backend/.env)
 

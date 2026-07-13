@@ -1,6 +1,6 @@
 import type {
   Position, Transaction, SavingsPlan, Quote, Fundamentals, NewsItem, AgentStatus,
-  EvalMetrics, Backtest, ScreenerResponse, ScreenerUniverseStatus,
+  EvalMetrics, Backtest,
 } from '@/types'
 
 const BASE = 'http://localhost:8000/api'
@@ -79,33 +79,28 @@ export const api = {
     status: () => request<AgentStatus>('/agent/status'),
     pullModel: () => fetch(`${BASE}/agent/pull-model`, { method: 'POST' }),
 
-    analyzeStock: (ticker: string, currentPrices: Record<string, number>, agentic = false): EventSource => {
-      const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/analyze/${ticker}?current_prices=${pricesParam}&agentic=${agentic}`)
-    },
+    // Deterministic statistical models for one ticker (ARIMA + RandomForest), no LLM — the
+    // "📊 Statistik" button in the positions view.
+    quickStats: (ticker: string) =>
+      request<{
+        ticker: string
+        error?: string
+        arima?: { signal: string; confidence: number | null; forecast_30d: number | null; details: string }
+        random_forest?: { signal: string; confidence: number | null; details: string }
+      }>(`/agent/quick-stats/${ticker}`),
 
-    analyzePortfolio: (currentPrices: Record<string, number>): EventSource => {
-      const pricesParam = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/analyze-portfolio?current_prices=${pricesParam}`)
-    },
-
-    chat: (question: string, currentPrices: Record<string, number>): EventSource => {
+    // Unified routing agent: one free-text question → the LLM routes to the right tool
+    // (strategy screen / NL-news judgment / statistics) → visible tool-trace + explanation (SSE).
+    ask: (
+      question: string,
+      currentPrices: Record<string, number>,
+      history: { role: string; content: string }[] = [],
+    ): EventSource => {
       const p = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/chat?question=${encodeURIComponent(question)}&current_prices=${p}`)
-    },
-
-    nlTarget: (criterion: string, ticker: string, mode: 'fast' | 'agentic'): EventSource =>
-      new EventSource(
-        `${BASE}/agent/nl-target?ticker=${encodeURIComponent(ticker)}` +
-        `&criterion=${encodeURIComponent(criterion)}&mode=${mode}`,
-      ),
-
-    newsSummary: (ticker: string): EventSource =>
-      new EventSource(`${BASE}/agent/news-summary/${ticker}`),
-
-    rebalance: (currentPrices: Record<string, number>): EventSource => {
-      const p = encodeURIComponent(JSON.stringify(currentPrices))
-      return new EventSource(`${BASE}/agent/rebalance?current_prices=${p}`)
+      const h = encodeURIComponent(JSON.stringify(history))
+      return new EventSource(
+        `${BASE}/agent/ask?question=${encodeURIComponent(question)}&current_prices=${p}&history=${h}`,
+      )
     },
   },
 
@@ -117,17 +112,6 @@ export const api = {
       const t = tickers.length ? `&tickers=${tickers.join(',')}` : ''
       return request<Backtest>(`/eval/backtest?horizon=${horizon}&step=${step}${t}`)
     },
-  },
-
-  // ── Screener ───────────────────────────────────────────────────────────────
-
-  screener: {
-    latest: () => request<ScreenerResponse>('/screener/alt-b/latest'),
-    scan: (limit = 12, minScore = 0): EventSource =>
-      new EventSource(`${BASE}/screener/alt-b/scan?limit=${limit}&min_score=${minScore}`),
-    universe: () => request<ScreenerUniverseStatus>('/screener/universe'),
-    universeRefresh: (): EventSource =>
-      new EventSource(`${BASE}/screener/universe/refresh`),
   },
 
   // ── Import ────────────────────────────────────────────────────────────────────

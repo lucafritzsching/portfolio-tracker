@@ -16,13 +16,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import PriceHistory, FundamentalsCache, NewsCache
-from services.number_utils import finite_number
 
 # Daily OHLCV bars: cache counts as fresh if the newest stored bar is within this
 # many calendar days (covers weekends/holidays without refetching every request).
 PRICE_FRESH_DAYS = 3
 FUNDAMENTALS_TTL = timedelta(hours=12)
 NEWS_TTL = timedelta(hours=1)
+
+# Ein Refresh ersetzt die KOMPLETTE gespeicherte Historie (delete + insert). Damit ein
+# kurzer Zeitraum (z. B. LLM-gewähltes period="1mo") die 2y-Historie der Statistik-Modelle
+# nicht wegwerfen kann, wird nie kürzer als "2y" heruntergeladen; längere Anfragen bleiben erlaubt.
+_PERIOD_RANK = {"1mo": 1, "3mo": 2, "6mo": 3, "1y": 4, "2y": 5, "5y": 6, "10y": 7, "max": 8}
+
+
+def _download_period(period: str) -> str:
+    return period if _PERIOD_RANK.get(period, 0) > _PERIOD_RANK["2y"] else "2y"
 
 
 def _cell(row, col):
@@ -51,7 +59,7 @@ async def fetch_and_store_prices(
 
     try:
         df = await asyncio.to_thread(
-            yf.download, ticker, period=period, auto_adjust=True, progress=False
+            yf.download, ticker, period=_download_period(period), auto_adjust=True, progress=False
         )
     except Exception:
         # On a fetch failure fall back to whatever is cached (demo robustness).
@@ -122,14 +130,14 @@ async def fetch_and_store_fundamentals(
         return cached
 
     fields = dict(
-        pe_ratio=finite_number(info.get("trailingPE")),
-        market_cap=finite_number(info.get("marketCap")),
-        eps=finite_number(info.get("trailingEps")),
-        revenue_growth=finite_number(info.get("revenueGrowth")),
-        fifty_two_week_high=finite_number(info.get("fiftyTwoWeekHigh")),
-        fifty_two_week_low=finite_number(info.get("fiftyTwoWeekLow")),
-        dividend_yield=finite_number(info.get("dividendYield")),
-        beta=finite_number(info.get("beta")),
+        pe_ratio=info.get("trailingPE"),
+        market_cap=info.get("marketCap"),
+        eps=info.get("trailingEps"),
+        revenue_growth=info.get("revenueGrowth"),
+        fifty_two_week_high=info.get("fiftyTwoWeekHigh"),
+        fifty_two_week_low=info.get("fiftyTwoWeekLow"),
+        dividend_yield=info.get("dividendYield"),
+        beta=info.get("beta"),
         fetched_at=datetime.utcnow(),
     )
     if cached:
@@ -145,6 +153,17 @@ async def fetch_and_store_fundamentals(
 
 # ── News ──────────────────────────────────────────────────────────────────────
 
+# Frische am FETCH-Zeitpunkt messen, nicht am published_at des neuesten Artikels (der ist
+# fast immer > 1 h alt → sonst refetcht jeder Aufruf Finnhub). Prozess-lokal, weil NewsCache
+# keine fetched_at-Spalte hat und es keine Migrationen gibt; Neustart → ein Refetch je Ticker.
+_news_fetched_at: dict[str, datetime] = {}
+
+
+def _news_fresh(ticker: str, force: bool) -> bool:
+    last = _news_fetched_at.get(ticker)
+    return (not force) and last is not None and (datetime.utcnow() - last) < NEWS_TTL
+
+
 async def fetch_and_store_news(
     ticker: str, db: AsyncSession, days: int = 14, force: bool = False
 ) -> list[NewsCache]:
@@ -159,10 +178,8 @@ async def fetch_and_store_news(
         )
     ).scalars().all()
 
-    if not force and existing:
-        newest = max(n.published_at for n in existing)
-        if (datetime.utcnow() - newest) < NEWS_TTL:
-            return existing
+    if _news_fresh(ticker, force):
+        return existing
 
     if settings.finnhub_api_key:
         frm = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -175,6 +192,9 @@ async def fetch_and_store_news(
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(url)
                 articles = resp.json() if resp.is_success else []
+                if resp.is_success:
+                    # Nur bei Erfolg stempeln — ein Netzfehler soll beim nächsten Aufruf erneut versuchen.
+                    _news_fetched_at[ticker] = datetime.utcnow()
         except Exception:
             articles = []
 

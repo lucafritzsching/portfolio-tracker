@@ -1,14 +1,25 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import init_db
-from routers import portfolio, quotes, market_data, agent, screener
+from database import init_db, seed_demo_positions
+from routers import portfolio, quotes, market_data, agent
 from routers import eval as eval_router
+
+# Durchgehendes Logging: Tool-Calls, Routing-Schritte und Tracebacks landen sichtbar im Server-Log
+# (statt stumm im SSE-`[FEHLER]`-String zu verschwinden). Der "agent"-Logger wird überall genutzt.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("agent").setLevel(logging.INFO)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await seed_demo_positions()   # only seeds when the portfolio is empty
     yield
 
 
@@ -21,7 +32,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175",
+                   "http://localhost:3000", "http://localhost:8080"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,7 +43,6 @@ app.include_router(portfolio.router, prefix="/api")
 app.include_router(quotes.router, prefix="/api")
 app.include_router(market_data.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
-app.include_router(screener.router, prefix="/api")
 app.include_router(eval_router.router, prefix="/api")
 
 

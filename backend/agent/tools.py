@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -16,8 +18,35 @@ from agent.data_science import (
     run_arima_forecast,
     run_ml_signal,
 )
+from eval.backtest import run_backtest as run_backtest_eval
 from models import Position, Transaction, NewsCache
-from services.market_data import fetch_and_store_prices, prices_to_dicts
+from services.market_data import fetch_and_store_prices, prices_to_dicts, fetch_and_store_news
+from services.finder import (
+    DEFAULT_MAX_CANDIDATES, load_fallback_universe, parse_mandate, run_predefined_screen, run_screen,
+)
+from services.nl_target import NLItem, evaluate_nl_target
+from services.event_strength import is_relevant
+
+logger = logging.getLogger("agent")
+
+
+def _to_f(x):
+    try:
+        return None if x is None else float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _news_items(news) -> list[NLItem]:
+    """NewsCache-Zeilen → NLItems (Headline + Summary) für den NL-Judge."""
+    items = []
+    for n in news:
+        headline = (getattr(n, "headline", "") or "").strip()
+        summary = (getattr(n, "summary", "") or "").strip()
+        text = f"{headline}. {summary}".strip() if summary else headline
+        if text:
+            items.append(NLItem(text=text, source=getattr(n, "source", None)))
+    return items
 
 # ── Tool schemas for Ollama (OpenAI-compatible format) ───────────────────────
 
@@ -109,6 +138,89 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_by_strategy",
+            "description": ("Findet Aktien zu einer Freitext-STRATEGIE (Beispiel: Nasdaq Biotech, "
+                            "<15 Mrd. Market Cap, >20% Umsatzwachstum). Wandelt das Mandat in harte Filter "
+                            "(Börse/Sektor/Market-Cap/Umsatzwachstum) und liefert passende Kandidaten "
+                            "(Ticker, Name, Market Cap). Nutze dies, wenn der Nutzer Unternehmen SUCHEN/"
+                            "SCREENEN will, statt einen einzelnen Ticker zu nennen."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mandate": {"type": "string", "description": "Die Anlagestrategie als Freitext"},
+                },
+                "required": ["mandate"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "discover_news_movers",
+            "description": ("Ticker-FREIE Entdeckung: Welche Aktien bewegen sich HEUTE auffällig "
+                            "(Tagesgewinner/-verlierer/meistgehandelt) und was sagen ihre News dazu? "
+                            "Deterministische Mover-Quelle (Yahoo-Screen) → beleggebundenes News-Urteil "
+                            "je Kandidat → rangierte Liste mit %-Bewegung und zitierten Schlagzeilen. "
+                            "Nutze dies, wenn der Nutzer KEINEN Ticker nennt und nach Movern/auffälligen "
+                            "News fragt (z. B. 'welche Aktien sind heute mit guten News gestiegen?')."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["gainers", "losers", "actives"],
+                        "description": "gainers = Tagesgewinner, losers = Tagesverlierer, actives = meistgehandelt",
+                    },
+                    "criterion": {
+                        "type": "string",
+                        "description": "Optionales Freitext-Kriterium für das News-Urteil (Default: kursrelevante News, die die Bewegung erklären)",
+                    },
+                },
+                "required": ["direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_backtest",
+            "description": ("Walk-Forward-Backtest des deterministischen Ensemble-Signals für EIN "
+                            "Ticker-Symbol: Wie oft traf BUY/HOLD/SELL historisch die 20-Tage-"
+                            "Forward-Rendite, verglichen mit der Buy&Hold-Baseline aller Fenster? "
+                            "Nutze dies für Fragen nach der ZUVERLÄSSIGKEIT/Güte des Signals "
+                            "(z. B. 'wie gut hat das Kaufsignal für AAPL funktioniert?'). "
+                            "Dauert ca. 20-60 Sekunden."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Ticker-Symbol"},
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "judge_news",
+            "description": ("Beurteilt anhand aktueller Schlagzeilen, ob eine Aktie ein FREITEXT-KRITERIUM "
+                            "in Klarsprache erfüllt (Beispiele: hat aktuell eine Turnaround-Story; zuletzt "
+                            "gute News). Liefert ein geklammertes Urteil (matches, Signifikanz 0-5), "
+                            "Begründung, Belege und den Determinismus-Trace (regex-Basis vs. LLM). Nutze "
+                            "dies für News-/Sentiment-/Narrativ-Fragen in natürlicher Sprache."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Ticker-Symbol"},
+                    "criterion": {"type": "string", "description": "Das Freitext-Kriterium in Klarsprache"},
+                },
+                "required": ["ticker", "criterion"],
+            },
+        },
+    },
 ]
 
 
@@ -119,6 +231,17 @@ class ToolExecutor:
         self.db = db
         self.current_prices = current_prices or {}
         self._price_cache: dict[str, list[dict]] = {}
+        self._info_cache: dict[str, dict] = {}
+
+    async def _yf_info(self, ticker: str) -> dict:
+        """EIN yf.Ticker(...).info-Abruf pro Ticker und Lauf — geteilt von Fundamentals,
+        Kandidaten-Anreicherung und Namens-Lookup. Fehler → leeres Dict (für diesen Lauf)."""
+        if ticker not in self._info_cache:
+            try:
+                self._info_cache[ticker] = await asyncio.to_thread(lambda: yf.Ticker(ticker).info) or {}
+            except Exception:
+                self._info_cache[ticker] = {}
+        return self._info_cache[ticker]
 
     async def execute(self, tool_name: str, arguments: dict) -> str:
         handlers = {
@@ -128,14 +251,25 @@ class ToolExecutor:
             "get_news": self._get_news,
             "run_statistical_model": self._run_statistical_model,
             "get_portfolio_context": self._get_portfolio_context,
+            "screen_by_strategy": self._screen_by_strategy,
+            "judge_news": self._judge_news,
+            "run_backtest": self._run_backtest,
+            "discover_news_movers": self._discover_news_movers,
         }
         handler = handlers.get(tool_name)
         if not handler:
+            logger.warning("Unbekanntes Tool angefragt: %s", tool_name)
             return json.dumps({"error": f"Unbekanntes Tool: {tool_name}"})
+        logger.info("Tool-Call: %s(%s)", tool_name, arguments)
+        t0 = time.perf_counter()
         try:
-            return await handler(**arguments)
+            result = await handler(**arguments)
+            logger.info("Tool-OK: %s in %.2fs", tool_name, time.perf_counter() - t0)
+            return result
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            # Traceback ins Server-Log (statt stumm im SSE-String zu verschwinden) + JSON-Fehler zurück.
+            logger.exception("Tool-FEHLER: %s(%s)", tool_name, arguments)
+            return json.dumps({"error": f"{type(e).__name__}: {e}"})
 
     async def _get_historical_prices(self, ticker: str, period: str = "1y") -> str:
         ticker = ticker.upper()
@@ -171,48 +305,49 @@ class ToolExecutor:
 
     async def _get_fundamentals(self, ticker: str) -> str:
         ticker = ticker.upper()
-        try:
-            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
-            if not info:
-                return json.dumps({"error": "Keine Daten"})
-            return json.dumps({
-                "ticker": ticker,
-                "pe_ratio": info.get("trailingPE"),
-                "forward_pe": info.get("forwardPE"),
-                "market_cap": info.get("marketCap"),
-                "eps": info.get("trailingEps"),
-                "eps_growth": info.get("earningsGrowth"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "profit_margin": info.get("profitMargins"),
-                "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
-                "dividend_yield": info.get("dividendYield"),
-                "beta": info.get("beta"),
-                "sector": info.get("sector"),
-                "industry": info.get("industry"),
-                "analyst_target_price": info.get("targetMeanPrice"),
-                "recommendation": info.get("recommendationKey"),
-            })
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        info = await self._yf_info(ticker)
+        if not info:
+            return json.dumps({"error": "Keine Daten"})
+        return json.dumps({
+            "ticker": ticker,
+            "pe_ratio": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "market_cap": info.get("marketCap"),
+            "eps": info.get("trailingEps"),
+            "eps_growth": info.get("earningsGrowth"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "profit_margin": info.get("profitMargins"),
+            "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+            "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+            "dividend_yield": info.get("dividendYield"),
+            "beta": info.get("beta"),
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+            "analyst_target_price": info.get("targetMeanPrice"),
+            "recommendation": info.get("recommendationKey"),
+        })
 
     async def _get_news(self, ticker: str, days: int = 7) -> str:
         ticker = ticker.upper()
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        result = await self.db.execute(
-            select(NewsCache)
-            .where(NewsCache.ticker == ticker, NewsCache.published_at >= cutoff)
-            .order_by(NewsCache.published_at.desc())
-            .limit(10)
-        )
-        news = result.scalars().all()
-        if not news:
-            return json.dumps({"ticker": ticker, "news": [], "message": "Keine gecachten News. Bitte zuerst /market-data/news/{ticker} aufrufen."})
+        news = await fetch_and_store_news(ticker, self.db, days=days)
+        # Relevance filter: Finnhub's company-news feed can include market-wide / multi-tagged articles
+        # (e.g. Uniswap/Roku stories under "AAPL"). Keep only headlines that actually mention the company —
+        # the same guard judge_news uses — so the agent never reasons over off-topic noise.
+        name = await self._company_name(ticker)
+        relevant = [
+            n for n in news
+            if is_relevant(f"{n.headline or ''} {n.summary or ''}", "", ticker, name)
+        ]
+        if not relevant:
+            return json.dumps({
+                "ticker": ticker, "article_count": 0,
+                "message": "Keine unternehmensspezifischen Nachrichten in diesem Zeitraum gefunden.",
+            }, ensure_ascii=False)
 
-        avg_sentiment = sum(float(n.sentiment or 0) for n in news) / len(news)
+        avg_sentiment = sum(float(n.sentiment or 0) for n in relevant) / len(relevant)
         return json.dumps({
             "ticker": ticker,
-            "article_count": len(news),
+            "article_count": len(relevant),
             "avg_sentiment": round(avg_sentiment, 3),
             "sentiment_label": "positiv" if avg_sentiment > 0.1 else ("negativ" if avg_sentiment < -0.1 else "neutral"),
             "articles": [
@@ -222,9 +357,9 @@ class ToolExecutor:
                     "published": n.published_at.strftime("%Y-%m-%d"),
                     "sentiment": float(n.sentiment) if n.sentiment else None,
                 }
-                for n in news[:5]
+                for n in relevant[:5]
             ],
-        })
+        }, ensure_ascii=False)
 
     async def _run_statistical_model(self, ticker: str) -> str:
         ticker = ticker.upper()
@@ -232,7 +367,7 @@ class ToolExecutor:
         if not prices:
             return json.dumps({"error": f"Keine Kursdaten für {ticker}"})
 
-        arima = run_arima_forecast(prices)
+        arima = run_arima_forecast(prices, validate=True)
         ml = run_ml_signal(prices)
 
         # Consensus signal
@@ -309,8 +444,171 @@ class ToolExecutor:
             "note": pos.note,
         })
 
+    async def _enrich(self, ticker: str) -> tuple:
+        """Echte Fundamentaldaten je Kandidat (Market Cap, Umsatzwachstum, KGV, Name) — gecacht pro Lauf."""
+        info = await self._yf_info(ticker)
+        if not info:
+            return (None, None, None, ticker)
+        return (_to_f(info.get("marketCap")), _to_f(info.get("revenueGrowth")),
+                _to_f(info.get("trailingPE")), info.get("shortName") or info.get("longName") or ticker)
+
+    async def _screen_by_strategy(self, mandate: str) -> str:
+        """Strategie-Finder in EINEM Schritt: Mandat → deterministischer Screen → Fundamentaldaten
+        (parallel) → Re-Filter auf echten Werten (Market Cap + Umsatzwachstum) → rangierte Liste.
+
+        Bewusst KEINE Pro-Kandidat-LLM-Verkettung: die teuren Werte kommen aus yfinance (~Sekunden,
+        parallel), nicht aus N tool-bestückten 14B-Aufrufen. Market Cap und Umsatzwachstum stehen mit
+        echten Zahlen im Ergebnis, sodass der Filter nachvollziehbar/überprüfbar ist.
+        """
+        parsed = await parse_mandate(mandate)
+        candidates, source = await run_screen(parsed.filters)
+        if not candidates:
+            candidates = load_fallback_universe()
+            source = "fallback_universe"
+
+        f = parsed.filters
+        max_mc, min_mc, min_growth = f.get("max_market_cap"), f.get("min_market_cap"), f.get("min_revenue_growth")
+        pool = candidates[:12]
+        enriched = await asyncio.gather(*[self._enrich(c.ticker) for c in pool])
+
+        rows = []
+        for c, (mc, rg, pe, name) in zip(pool, enriched):
+            mc = mc if mc is not None else c.market_cap
+            if max_mc and mc and mc > max_mc:
+                continue
+            if min_mc and mc and mc < min_mc:
+                continue
+            if min_growth is not None and rg is not None and rg * 100 < min_growth:
+                continue  # Umsatzwachstum „im letzten Jahr" gegen echten Wert geprüft
+            row = {
+                "ticker": c.ticker,
+                "name": name or c.name,
+                "market_cap_bn": round(mc / 1e9, 2) if mc else None,
+                "revenue_growth_pct": round(rg * 100, 1) if rg is not None else None,
+                "pe": round(pe, 1) if pe else None,
+            }
+            if min_growth is not None and rg is None:
+                # Kein Wachstumswert verfügbar → nicht still durchlassen, sondern kennzeichnen.
+                row["revenue_growth_unchecked"] = True
+            rows.append(row)
+
+        if min_growth is not None:
+            # Wachstums-Mandat: geprüfte Kandidaten zuerst, dann nach echtem Wachstum absteigend.
+            rows.sort(key=lambda r: (not r.get("revenue_growth_unchecked", False),
+                                     r["revenue_growth_pct"] if r["revenue_growth_pct"] is not None else float("-inf")),
+                      reverse=True)
+        else:
+            rows.sort(key=lambda r: (r["market_cap_bn"] or 0), reverse=True)
+
+        return json.dumps({
+            "mandate": mandate,
+            "parsed_filters": f,
+            "nl_criterion": parsed.nl_criterion,
+            "source": source,
+            "match_count": len(rows),
+            "candidates": rows[:DEFAULT_MAX_CANDIDATES],
+            "hinweis": ("market_cap_bn und revenue_growth_pct sind echte Fundamentaldaten, nach dem Screen "
+                        "erneut geprüft. Kandidaten mit revenue_growth_unchecked=true haben KEINEN "
+                        "verfügbaren Wachstumswert — als ungeprüft benennen, nicht behaupten."),
+        }, ensure_ascii=False)
+
+    async def _company_name(self, ticker: str) -> str:
+        """Company name for the relevance filter (cached per run). Falls back to '' on failure."""
+        info = await self._yf_info(ticker)
+        return info.get("shortName") or info.get("longName") or ""
+
+    async def _judge_news(self, ticker: str, criterion: str) -> str:
+        """NL-Urteil: aktuelle Schlagzeilen gegen ein Freitext-Kriterium (sektor-agnostisch, beleggebunden).
+
+        Filtert die News per Ticker/Name auf das Unternehmen (sonst kann der Finnhub-Feed themenfremde
+        Artikel einschleusen), dann beurteilt das LLM das Kriterium und muss echte Schlagzeilen zitieren.
+        """
+        ticker = ticker.upper()
+        news = await fetch_and_store_news(ticker, self.db, days=14)
+        if not news:
+            return json.dumps({
+                "ticker": ticker, "criterion": criterion, "matches": False,
+                "message": "Keine aktuellen Schlagzeilen gefunden — keine NL-Beurteilung möglich.",
+            }, ensure_ascii=False)
+        items = _news_items(news)
+        name = await self._company_name(ticker)
+        verdict = await evaluate_nl_target(criterion, items, ticker=ticker, name=name, mode="fast")
+        return json.dumps({
+            "ticker": ticker,
+            "criterion": criterion,
+            "matches": verdict.matches,
+            "significance": verdict.strength,
+            "reason": verdict.reason,
+            "evidence": verdict.evidence[:3],
+            "trace": {
+                "llm_strength": verdict.llm_strength,
+                "final": verdict.strength,
+                "n_evidence_cited": len(verdict.evidence),
+                "source": verdict.source,
+            },
+            "headlines_checked": len(items),
+        }, ensure_ascii=False)
+
+    DISCOVER_JUDGE_LIMIT = 5   # wie viele Mover den NL-Judge erreichen (Compute-Budget, ~5-8s je Urteil)
+
+    async def _discover_news_movers(self, direction: str = "gainers", criterion: str = "") -> str:
+        """Ticker-freie News-Discovery: deterministische Mover-Quelle → beleggebundenes NL-Urteil.
+
+        `is_relevant` kann nicht rückwärts entdecken (braucht immer einen Kandidaten) — deshalb
+        liefert der Yahoo-Mover-Screen die Kandidaten, und erst DANACH urteilt der NL-Judge über
+        deren News (dieselbe Grounding-Garantie wie judge_news: nur echte Schlagzeilen zählen).
+        """
+        movers = await run_predefined_screen(direction, count=10)
+        if not movers:
+            return json.dumps({
+                "error": f"Mover-Screen '{direction}' nicht verfügbar (Yahoo nicht erreichbar oder unbekannte Richtung).",
+            }, ensure_ascii=False)
+
+        crit = (criterion or "").strip() or "aktuelle kursrelevante Nachrichten, die die Kursbewegung erklären"
+        judged = []
+        for m in movers[: self.DISCOVER_JUDGE_LIMIT]:
+            news = await fetch_and_store_news(m["ticker"], self.db, days=7)
+            items = _news_items(news)
+            if items:
+                v = await evaluate_nl_target(crit, items, ticker=m["ticker"], name=m["name"] or "", mode="fast")
+                judged.append({**m, "matches": v.matches, "significance": v.strength,
+                               "reason": v.reason, "evidence": v.evidence[:2]})
+            else:
+                judged.append({**m, "matches": False, "significance": 0,
+                               "reason": "Keine unternehmensspezifischen Schlagzeilen gefunden.",
+                               "evidence": []})
+        judged.sort(key=lambda r: (r["matches"], r["significance"], abs(r["change_pct"] or 0)), reverse=True)
+
+        return json.dumps({
+            "direction": direction,
+            "criterion": crit,
+            "source": "yahoo_predefined_screen",
+            "candidates": judged,
+            "weitere_ticker_ungeprueft": [m["ticker"] for m in movers[self.DISCOVER_JUDGE_LIMIT:]],
+            "hinweis": ("Urteile sind beleggebunden (evidence = echte Schlagzeilen). Kandidaten ohne "
+                        "matches haben keine belegbaren News zum Kriterium — %-Bewegung trotzdem nennen."),
+        }, ensure_ascii=False)
+
+    async def _run_backtest(self, ticker: str) -> str:
+        """Walk-Forward-Backtest für EIN Ticker (step=10 statt 5: halbe Fensterzahl → Chat-taugliche
+        Laufzeit). Jedes Fenster fittet ARIMA+RF — das läuft im Eval-Modul via to_thread."""
+        ticker = ticker.upper()
+        res = await run_backtest_eval(self.db, [ticker], horizon_days=20, step_days=10)
+        return json.dumps({
+            "ticker": ticker,
+            "params": res["params"],
+            "results": res["per_ticker"].get(ticker, {}),
+            "hinweis": ("Signal je Fenster vs. 20-Tage-Forward-Rendite; 'baseline' = Buy&Hold über "
+                        "ALLE Fenster — BUY ist nur gut, wenn es die Baseline schlägt. Kleine n → "
+                        "nicht signifikant, als Tendenz formulieren."),
+        }, ensure_ascii=False)
+
     async def _fetch_prices(self, ticker: str, period: str) -> list[dict]:
-        """Fetch prices via the shared service, cached per analysis to avoid repeat work."""
+        """Fetch prices via the shared service, cached per analysis to avoid repeat work.
+
+        Nur nach Ticker gekeyt: der Service lädt nie kürzer als 2y (Superset), d. h. ein
+        vorheriger "1mo"-Abruf kann einem späteren "2y"-Abruf keine Daten wegnehmen.
+        """
         ticker = ticker.upper()
         if ticker in self._price_cache:
             return self._price_cache[ticker]

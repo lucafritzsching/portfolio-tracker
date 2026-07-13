@@ -1,4 +1,4 @@
-# Präsentations-Flowcharts — Alt-B Refactor (NL-Ziel-Agent)
+# Präsentations-Flowcharts — Alt-B (NL-Ziel-Agent) + Alt-A-Vergleich
 
 > Präsentationsfertige Diagramme für die Verteidigung (Dienstag). Grundlage:
 > [alt-b-funktionen-verteidigung.md](alt-b-funktionen-verteidigung.md). **Alle Zahlen** stammen aus
@@ -421,6 +421,140 @@ repräsentatives Sample.“
 
 ---
 
+## Flowchart 6 — Alt-A (deterministische Baseline)
+
+**Ziel der Grafik:** Zeigen, wie der **Alt-A-Agent** zu seiner Empfehlung kommt — die Entscheidung fällt
+**deterministisch im Code**, das LLM **erklärt sie nur** (eingehegt durch das Evidence-Gate).
+
+> Hinweis (mit Alt-A-Team zu bestätigen): Alt-A ist die eingefrorene **v2.0-Baseline**
+> (`feature/strategy-alt-a`, Commit `098a7b7`). Das Ziel „Bollinger > x" ist **konzeptionell** — im Code ist
+> Bollinger **ein** Eingang des `technical`-Signals, keine Einzelregel.
+
+### Mermaid
+
+```mermaid
+flowchart TD
+    U["👤 User<br/><i>Ticker</i>"]
+    V["AnalysisView.vue<br/><i>SSE</i>"]
+    E["GET /api/agent/analyze/{ticker}<br/><i>routers/agent.py → orchestrator.py</i>"]
+    P1["Phase 1 — Datensammlung<br/><i>pipeline.py · Preise/Fundamentals/News (+ LLM-Sentiment)</i>"]
+    P2["Phase 2 — Deterministisches Ensemble<br/><i>data_science.py · compute_ensemble()</i>"]
+    SUB["technical 0.30 · ARIMA 0.20 · RandomForest 0.25<br/>fundamentals 0.10 · news 0.15"]
+    DEC["Score = Σ(Gewicht × Signal)<br/>&gt; +0.25 BUY · &lt; −0.25 SELL · sonst HOLD"]
+    P4["Phase 4 — LLM erklärt + Evidence-Gate<br/><i>evidence.py · eval/faithfulness.py</i>"]
+    F["🖥️ Frontend<br/><i>deterministischer Block + gegate Erklärung</i>"]
+
+    U --> V --> E --> P1 --> P2
+    P2 --- SUB
+    P2 --> DEC --> P4 --> F
+    F -. Anzeige .-> U
+
+    classDef det fill:#e8f0fe,stroke:#3367d6,color:#173a8a;
+    classDef ai fill:#fde9e9,stroke:#d23f3f,color:#7a1f1f;
+    classDef io fill:#eafaf1,stroke:#2e8b57,color:#14532d;
+    class P2,DEC,SUB det;
+    class P4 ai;
+    class U,V,E,P1,F io;
+```
+
+### ASCII
+
+```
+  User (Ticker)
+        ▼
+  GET /api/agent/analyze/{ticker}
+        ▼
+  Phase 1 — Daten: Preise · Fundamentals · News (+ LLM-Sentiment)
+        ▼
+  Phase 2 — 🔵 DETERMINISTISCHES ENSEMBLE  (data_science.py)
+     technical .30 · ARIMA .20 · RF .25 · fundamentals .10 · news .15
+        ▼
+     Score = Σ(Gewicht × Signal)
+     > +0.25 → BUY   |   < −0.25 → SELL   |   sonst → HOLD
+        ▼
+  Phase 4 — 🔴 LLM ERKLÄRT (eingehegt) + 🟢 Evidence-Gate
+        ▼
+  Frontend: deterministischer Block + gegate Erklärung
+```
+
+**Erklärung:** Die Empfehlung ist eine **reine Funktion** der Eingaben (gleiche Daten → gleiche Entscheidung).
+Das LLM kommt erst **nach** der Entscheidung und darf sie nur begründen; das Evidence-Gate entfernt jede Zahl,
+die nicht aus der Pipeline gedeckt ist.
+
+**Typische Professorenfrage:** *„Wo trifft bei Alt-A die KI die Entscheidung?"*
+
+**Musterantwort:** „Gar nicht. Die Entscheidung ist deterministisch — ein gewichtetes Ensemble aus Technik,
+ARIMA, Random Forest, Fundamentaldaten und News-Sentiment. Das LLM erklärt das Ergebnis nur, und selbst
+dabei hält ein Evidence-Gate jede ungedeckte Zahl zurück. Reproduzierbarkeit war die bewusste Entscheidung
+(ADR-07)."
+
+---
+
+## Flowchart 7 — Alt-A vs. Alt-B (der Vergleich)
+
+**Ziel der Grafik:** Die zwei Alternativen **vergleichbar** nebeneinanderstellen: gleiche Basis, **ein** bewusst
+variierter Unterschied — **wo das LLM sitzt** und **wie es eingehegt wird**.
+
+### Mermaid
+
+```mermaid
+flowchart TD
+    B["Gemeinsame Basis<br/><i>Daten-Services (yfinance/Finnhub/Cache) · Hybrid-Philosophie · Anti-Halluzination</i>"]
+    B --> A0{Ziel-Typ}
+    A0 -->|"Alt-A: Data-Science-Ziel"| A1["🔵 Ensemble ENTSCHEIDET<br/>BUY/HOLD/SELL"]
+    A1 --> A2["🔴 LLM erklärt · 🟢 Evidence-Gate"]
+    A0 -->|"Alt-B: NL-Ziel (Freitext)"| C1["🔴 LLM BEURTEILT<br/>das Kriterium"]
+    C1 --> C2["🔵 Clamp: Regex-Basis ±1<br/>(LLM kann nichts erfinden)"]
+    A2 --> R["Ausgabe + Trace"]
+    C2 --> R
+
+    classDef det fill:#e8f0fe,stroke:#3367d6,color:#173a8a;
+    classDef ai fill:#fde9e9,stroke:#d23f3f,color:#7a1f1f;
+    classDef io fill:#eafaf1,stroke:#2e8b57,color:#14532d;
+    class A1,C2 det;
+    class A2,C1 ai;
+    class B,A0,R io;
+```
+
+### ASCII
+
+```
+        Gemeinsame Basis (Daten-Services · Hybrid · Anti-Halluzination)
+                              │
+                  ┌───────────┴────────────┐
+        Alt-A: DS-Ziel                Alt-B: NL-Ziel (Freitext)
+              │                              │
+   🔵 Ensemble ENTSCHEIDET         🔴 LLM BEURTEILT Kriterium
+              │                              │
+   🔴 LLM erklärt                   🔵 Clamp: Regex-Basis ±1
+   🟢 Evidence-Gate                 (LLM kann nichts erfinden)
+              └───────────┬─────────────────┘
+                          ▼
+                    Ausgabe + Trace
+```
+
+**Kernunterschied:** Alt-A = **Code entscheidet, LLM erklärt** (Evidence-Gate). Alt-B = **LLM entscheidet,
+Code begrenzt** (Clamp). Beide hegen das LLM ein — nur an unterschiedlicher Stelle.
+
+| | Alt-A (DS-Ziel) | Alt-B (NL-Ziel) |
+|---|---|---|
+| Ziel | Data-Science (Ensemble) | Freitext-Kriterium (konfigurierbar) |
+| Wer entscheidet | Code (reine Funktion) | LLM, **begrenzt** durch Clamp |
+| LLM-Rolle | erklärt (+ Sentiment) | beurteilt das Kriterium |
+| Reproduzierbar | ✅ exakt | ⚠️ LLM (T=0), per Clamp gebunden |
+| Halluzinationsschutz | Evidence-Gate (Zahlen) | Clamp (Stärke, Regex ±1) |
+| Aufruf | pro Ticker (Analyse-View) | pro Ticker + Kriterium (Alt-B-View) |
+| Evaluation | Walk-Forward-Backtest + Faithfulness | 36-Fälle-Harness (Urteilsqualität) |
+
+**Typische Professorenfrage:** *„Sind die beiden Alternativen überhaupt vergleichbar?"*
+
+**Musterantwort:** „Ja — genau das ist das Experiment. Beide teilen Stack, Datenquellen und die Hybrid-Idee
+‚LLM eingehegt durch deterministischen Code'. Variiert wird bewusst nur **eine** Sache: der Ziel-Typ und damit,
+**wo** das LLM sitzt. Bei Alt-A entscheidet der Code und das LLM erklärt; bei Alt-B beurteilt das LLM ein
+Freitext-Kriterium, bleibt aber per Clamp an die deterministische Regex-Basis gebunden."
+
+---
+
 # Empfehlungen für Dienstag
 
 ## 1. Welche 3 Flowcharts gehören definitiv in die Präsentation?
@@ -473,3 +607,54 @@ dokumentierter Einzeiler-Fix, kein Modellproblem."
 beiden Modi, also 36 Läufe gegen das echte Qwen3:14b. Wichtig für die Einordnung — wir validieren Urteilsqualität
 und Halluzinationsschutz, ausdrücklich keine Trading-Performance und keine Renditen. Das ist eine bewusste
 Scope-Grenze, kein Versäumnis."
+
+---
+
+# Flowchart 8 — Router-Agent: ein Chat, drei Wege (aktuelle Architektur)
+
+> **Supersedes die getrennten Oberflächen.** Statt KI-Analyse / Alt-B-Finder / Vergleichs-View gibt es
+> jetzt **ein Chat-Fenster**. Der Agent **routet** eine Freitext-Anfrage per nativem Tool-Calling zum
+> passenden Werkzeug und erklärt nachvollziehbar, was er tut. Der „Alt-A vs. Alt-B"-Vergleich (Flowchart 7)
+> ist damit **konzeptionell** — deterministische Statistik-Tools vs. LLM-NL-Urteil **im selben Agenten** —
+> und keine eigene UI mehr. Auch der Halluzinationsschutz änderte sich: **kein Biotech-Regex-Clamp** mehr,
+> sondern **Belegbindung** (Flowcharts 2/3 beschreiben den alten, geklammerten NL-Pfad; aktuell siehe unten).
+
+```mermaid
+flowchart TD
+    Q["Freitext-Frage<br/>GET /api/agent/ask"] --> LLM{"Router-LLM<br/>qwen3, tool-calling, T=0"}
+    LLM -->|"News / Klarsprache"| NL["judge_news(ticker, criterion)<br/>Relevanz → LLM-Urteil → Belegbindung"]
+    LLM -->|"statistisch / quantitativ"| ST["run_statistical_model / technicals<br/>ARIMA + RandomForest + Indikatoren"]
+    LLM -->|"finde Unternehmen…"| SC["screen_by_strategy(mandate)<br/>yfinance EquityQuery (deterministisch)"]
+    SC -->|"Top-N Kandidaten"| NL
+    NL --> SYN["Synthese: Anfrage erklärt,<br/>Werkzeug genannt, echte Werte,<br/>vorsichtiger Schluss"]
+    ST --> SYN
+    SYN --> A["Antwort + sichtbare 🔧-Tool-Trace + Server-Log"]
+
+    classDef det fill:#e8f0fe,stroke:#3367d6,color:#173a8a;
+    classDef llm fill:#fef7e0,stroke:#f9ab00,color:#7a5900;
+    class ST,SC det;
+    class NL,LLM llm;
+```
+
+```
+Frage ──► Router-LLM (tool-calling)
+              ├── News/Klarsprache ─► judge_news  (Relevanz → LLM → Belegbindung)
+              ├── statistisch       ─► run_statistical_model / technicals (ARIMA+RF, deterministisch)
+              └── "finde …"         ─► screen_by_strategy (yfinance) ─► judge_news je Kandidat
+                                              │
+                                              ▼  Synthese + 🔧-Trace + Log ─► Antwort
+```
+
+## Drei Beispiel-Anfragen (live gegen qwen3 verifiziert)
+- **NL/News:** „Hat AAPL zuletzt gute News?" → `judge_news` → Relevanz-Filter (Apple) → LLM zitiert **echte**
+  Apple-Schlagzeilen (Belegbindung; Off-topic wie SpaceX rausgefiltert) → Urteil + Signifikanz + Belege.
+- **Statistik:** „ARIMA/RF-Signal für TSLA?" → `run_statistical_model` → ARIMA (95%-Intervall → ehrliche
+  Konfidenz) + RandomForest (Vorhersage auf aktuellem Bar + Out-of-Sample-Genauigkeit) → Erklärung.
+- **Strategie:** „Finde Nasdaq-Biotech < 15 Mrd., > 20 % Wachstum mit Turnaround" → `screen_by_strategy`
+  (deterministischer Live-Screen) → `judge_news` für die Top-Kandidaten → rangierte Erklärung.
+
+**Halluzinationsschutz (sektor-agnostisch):** Das NL-Urteil ist **nicht** mehr auf eine Biotech-Rubrik
+geklemmt; ein „Treffer" muss **echte Schlagzeilen zitieren**, sonst kein Treffer. Die Statistik ist
+deterministisch und **ehrlich ausgewiesen** (Konfidenz aus dem Prognoseintervall, Out-of-Sample-Genauigkeit).
+Reproduzierbar: [evidence/router_harness.py](evidence/router_harness.py). Methodik + Befunde:
+[12-data-science-methodik.md](12-data-science-methodik.md), [evidence/determinismus_vs_llm.md](evidence/determinismus_vs_llm.md).

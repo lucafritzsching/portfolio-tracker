@@ -9,10 +9,7 @@ import DashboardView from '@/views/DashboardView.vue'
 import PositionsView from '@/views/PositionsView.vue'
 import SavingsView from '@/views/SavingsView.vue'
 import NewsView from '@/views/NewsView.vue'
-import AnalysisView from '@/views/AnalysisView.vue'
 import ChatView from '@/views/ChatView.vue'
-import AltBView from '@/views/AltBView.vue'
-import ScreenerView from '@/views/ScreenerView.vue'
 import EvalView from '@/views/EvalView.vue'
 
 const portfolio = usePortfolioStore()
@@ -31,15 +28,16 @@ onMounted(async () => {
     <AppSidebar v-if="ui.sidebarOpen" @close="ui.sidebarOpen = false" />
 
     <main class="app-main">
-      <DashboardView v-if="ui.activeView === 'dashboard'" />
-      <PositionsView v-else-if="ui.activeView === 'positions'" />
-      <SavingsView v-else-if="ui.activeView === 'savings'" />
-      <NewsView v-else-if="ui.activeView === 'news'" />
-      <AnalysisView v-else-if="ui.activeView === 'analysis'" />
-      <ChatView v-else-if="ui.activeView === 'chat'" />
-      <AltBView v-else-if="ui.activeView === 'altb'" />
-      <ScreenerView v-else-if="ui.activeView === 'screener'" />
-      <EvalView v-else-if="ui.activeView === 'eval'" />
+      <!-- KeepAlive caches the views so the KI-Agent keeps streaming + preserves its answer/trace
+           when you switch tabs mid-run (and come back). -->
+      <KeepAlive>
+        <DashboardView v-if="ui.activeView === 'dashboard'" />
+        <PositionsView v-else-if="ui.activeView === 'positions'" />
+        <SavingsView v-else-if="ui.activeView === 'savings'" />
+        <NewsView v-else-if="ui.activeView === 'news'" />
+        <ChatView v-else-if="ui.activeView === 'chat'" />
+        <EvalView v-else-if="ui.activeView === 'eval'" />
+      </KeepAlive>
     </main>
 
     <AddPositionModal v-if="ui.showAddModal" />

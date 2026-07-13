@@ -135,8 +135,9 @@ async function runBacktest() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="sig in ['BUY', 'HOLD', 'SELL']" :key="sig" style="border-bottom: 1px solid var(--border)">
-              <td style="padding: 6px">{{ sig }}</td>
+            <!-- baseline = Forward-Rendite ALLER Fenster (Buy&Hold-Basisrate) — der Maßstab für BUY/SELL -->
+            <tr v-for="sig in ['BUY', 'HOLD', 'SELL', 'baseline']" :key="sig" style="border-bottom: 1px solid var(--border)">
+              <td style="padding: 6px">{{ sig === 'baseline' ? 'Baseline (Buy&Hold)' : sig }}</td>
               <td>{{ backtest.aggregate[sig]?.n ?? 0 }}</td>
               <td>{{ backtest.aggregate[sig]?.avg_return_pct ?? '–' }}</td>
               <td>{{ backtest.aggregate[sig]?.hit_rate != null ? (backtest.aggregate[sig].hit_rate! * 100).toFixed(0) + '%' : '–' }}</td>

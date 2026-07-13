@@ -8,6 +8,7 @@ The LLM never overrides the decision — it only explains it.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -21,12 +22,15 @@ from agent.tools import TOOL_DEFINITIONS, ToolExecutor
 from agent.prompts import (
     SYSTEM_PROMPT, EXPLAIN_STOCK_PROMPT, EXPLAIN_PORTFOLIO_PROMPT,
     CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT, NEWS_SUMMARY_PROMPT, REBALANCE_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
 )
 from config import settings
 from eval.faithfulness import check_faithfulness, apply_faithfulness_gate
 from agent.evidence import render as render_evidence
 from models import Position, AnalysisResult, AnalysisMetric
 from services.market_data import fetch_and_store_news
+
+logger = logging.getLogger("agent")
 
 _COMPONENT_LABELS = {
     "technical": "Technischer Trend",
@@ -156,6 +160,8 @@ async def _run_agent_loop(
     stats: dict | None = None,
     show_tools: bool = True,
     stream_final: bool = True,
+    temperature: float = 0.3,
+    trace: list | None = None,
 ) -> AsyncGenerator[str, None]:
     """Tool-use loop: the LLM may call tools; the final answer is streamed or returned as one block."""
     iteration = 0
@@ -168,7 +174,7 @@ async def _run_agent_loop(
             "stream": False,
             "think": False,
             "tools": TOOL_DEFINITIONS if not is_last else [],
-            "options": {"temperature": 0.3},
+            "options": {"temperature": temperature},
         }
         async with httpx.AsyncClient(timeout=180) as client:
             try:
@@ -176,6 +182,7 @@ async def _run_agent_loop(
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
+                logger.exception("Ollama-Anfrage fehlgeschlagen (Iteration %d)", iteration)
                 yield f"\n\n[Fehler bei Ollama-Anfrage: {e}]"
                 return
 
@@ -183,8 +190,23 @@ async def _run_agent_loop(
         tool_calls = message.get("tool_calls", [])
         if not tool_calls:
             tool_calls = _extract_text_tool_calls(message.get("content", ""))
+        logger.info("Agent-Loop It. %d: %d Tool-Call(s)%s", iteration, len(tool_calls),
+                    "" if tool_calls else " → finale Antwort")
         if not tool_calls:
-            if stream_final:
+            # Die finale Antwort wurde in DIESEM Call bereits generiert — direkt ausliefern,
+            # statt sie zu verwerfen und per zweitem Ollama-Call neu zu erzeugen (halbiert
+            # die Latenz der Schlussphase auf dem lokalen 14B-Modell).
+            content = message.get("content", "")
+            if content.strip():
+                if stats is not None:
+                    stats.update(data)
+                if stream_final:
+                    chunk_size = 120
+                    for i in range(0, len(content), chunk_size):
+                        yield content[i : i + chunk_size]
+                else:
+                    yield content
+            elif stream_final:
                 async for token in _stream_ollama_response(messages, stats):
                     yield token
             else:
@@ -205,6 +227,9 @@ async def _run_agent_loop(
             if show_tools:
                 yield f"\n\n> 🔧 Führe Tool aus: **{tool_name}**({_fmt_args(arguments)})…\n"
             tool_result = await executor.execute(tool_name, arguments)
+            if trace is not None:
+                trace.append({"step": iteration, "tool": tool_name, "args": arguments,
+                              "result": tool_result[:2500]})
             messages.append({"role": "tool", "content": tool_result})
 
     messages.append({"role": "user", "content": "Fasse jetzt alle gesammelten Daten zusammen und begründe die Empfehlung."})
@@ -326,6 +351,39 @@ async def chat_stream(
     executor = ToolExecutor(db=db, current_prices=current_prices)
     async for chunk in _run_agent_loop(messages, executor, show_tools=False):
         yield chunk
+
+
+async def ask_stream(
+    question: str,
+    db: AsyncSession,
+    current_prices: dict[str, float] | None = None,
+    history: list[dict] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Unified routing agent: ONE free-text question → the LLM picks the right tool(s) →
+    visible tool-trace + a grounded German explanation. Routing is via native Ollama tool-calling
+    (temperature 0 for reproducibility); the tools are deterministic/guarded (screen, NL-clamp, DS).
+
+    ``history`` carries prior {role, content} turns (conversation memory) so a follow-up like
+    "prüf News für CRNX" can refer back. Only the last few turns are kept (context/compute budget).
+    """
+    question = (question or "").strip()
+    if not question:
+        yield "_Keine Frage angegeben._\n"
+        return
+    logger.info("ask_stream: %r (history=%d)", question[:200], len(history or []))
+    messages: list[dict] = [{"role": "system", "content": ROUTER_SYSTEM_PROMPT}]
+    for m in (history or [])[-6:]:           # letzte ~3 Turns (user+assistant)
+        role, content = m.get("role"), (m.get("content") or "")[:1500]
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": question})
+    executor = ToolExecutor(db=db, current_prices=current_prices or {})
+    trace: list = []
+    async for chunk in _run_agent_loop(messages, executor, show_tools=True, temperature=0, trace=trace):
+        yield chunk
+    # Final structured trace (tool calls + results) — the frontend captures it for the exportable log
+    # and a collapsible trace view; it is NOT rendered into the visible answer.
+    yield "␞TRACE␞" + json.dumps({"question": question, "trace": trace}, ensure_ascii=False, default=str)
 
 
 async def news_summary_stream(ticker: str, db: AsyncSession) -> AsyncGenerator[str, None]:

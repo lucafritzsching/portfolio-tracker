@@ -10,6 +10,12 @@ export default defineConfig({
     vue(),
     vueDevTools(),
   ],
+  // Pin the dev port: fail loudly if 5173 is taken instead of silently moving to 5174
+  // (the backend CORS allows only known localhost ports).
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
