@@ -172,8 +172,17 @@ class ToolExecutor:
         self.db = db
         self.current_prices = current_prices or {}
         self._price_cache: dict[str, list[dict]] = {}
-        self._name_cache: dict[str, str] = {}
-        self._fund_cache: dict[str, tuple] = {}
+        self._info_cache: dict[str, dict] = {}
+
+    async def _yf_info(self, ticker: str) -> dict:
+        """EIN yf.Ticker(...).info-Abruf pro Ticker und Lauf — geteilt von Fundamentals,
+        Kandidaten-Anreicherung und Namens-Lookup. Fehler → leeres Dict (für diesen Lauf)."""
+        if ticker not in self._info_cache:
+            try:
+                self._info_cache[ticker] = await asyncio.to_thread(lambda: yf.Ticker(ticker).info) or {}
+            except Exception:
+                self._info_cache[ticker] = {}
+        return self._info_cache[ticker]
 
     async def execute(self, tool_name: str, arguments: dict) -> str:
         handlers = {
@@ -235,30 +244,27 @@ class ToolExecutor:
 
     async def _get_fundamentals(self, ticker: str) -> str:
         ticker = ticker.upper()
-        try:
-            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
-            if not info:
-                return json.dumps({"error": "Keine Daten"})
-            return json.dumps({
-                "ticker": ticker,
-                "pe_ratio": info.get("trailingPE"),
-                "forward_pe": info.get("forwardPE"),
-                "market_cap": info.get("marketCap"),
-                "eps": info.get("trailingEps"),
-                "eps_growth": info.get("earningsGrowth"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "profit_margin": info.get("profitMargins"),
-                "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
-                "dividend_yield": info.get("dividendYield"),
-                "beta": info.get("beta"),
-                "sector": info.get("sector"),
-                "industry": info.get("industry"),
-                "analyst_target_price": info.get("targetMeanPrice"),
-                "recommendation": info.get("recommendationKey"),
-            })
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        info = await self._yf_info(ticker)
+        if not info:
+            return json.dumps({"error": "Keine Daten"})
+        return json.dumps({
+            "ticker": ticker,
+            "pe_ratio": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "market_cap": info.get("marketCap"),
+            "eps": info.get("trailingEps"),
+            "eps_growth": info.get("earningsGrowth"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "profit_margin": info.get("profitMargins"),
+            "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+            "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+            "dividend_yield": info.get("dividendYield"),
+            "beta": info.get("beta"),
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+            "analyst_target_price": info.get("targetMeanPrice"),
+            "recommendation": info.get("recommendationKey"),
+        })
 
     async def _get_news(self, ticker: str, days: int = 7) -> str:
         ticker = ticker.upper()
@@ -379,16 +385,11 @@ class ToolExecutor:
 
     async def _enrich(self, ticker: str) -> tuple:
         """Echte Fundamentaldaten je Kandidat (Market Cap, Umsatzwachstum, KGV, Name) — gecacht pro Lauf."""
-        if ticker in self._fund_cache:
-            return self._fund_cache[ticker]
-        try:
-            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
-            out = (_to_f(info.get("marketCap")), _to_f(info.get("revenueGrowth")),
-                   _to_f(info.get("trailingPE")), info.get("shortName") or info.get("longName") or ticker)
-        except Exception:
-            out = (None, None, None, ticker)
-        self._fund_cache[ticker] = out
-        return out
+        info = await self._yf_info(ticker)
+        if not info:
+            return (None, None, None, ticker)
+        return (_to_f(info.get("marketCap")), _to_f(info.get("revenueGrowth")),
+                _to_f(info.get("trailingPE")), info.get("shortName") or info.get("longName") or ticker)
 
     async def _screen_by_strategy(self, mandate: str) -> str:
         """Strategie-Finder in EINEM Schritt: Mandat → deterministischer Screen → Fundamentaldaten
@@ -418,14 +419,25 @@ class ToolExecutor:
                 continue
             if min_growth is not None and rg is not None and rg * 100 < min_growth:
                 continue  # Umsatzwachstum „im letzten Jahr" gegen echten Wert geprüft
-            rows.append({
+            row = {
                 "ticker": c.ticker,
                 "name": name or c.name,
                 "market_cap_bn": round(mc / 1e9, 2) if mc else None,
                 "revenue_growth_pct": round(rg * 100, 1) if rg is not None else None,
                 "pe": round(pe, 1) if pe else None,
-            })
-        rows.sort(key=lambda r: (r["market_cap_bn"] or 0), reverse=True)
+            }
+            if min_growth is not None and rg is None:
+                # Kein Wachstumswert verfügbar → nicht still durchlassen, sondern kennzeichnen.
+                row["revenue_growth_unchecked"] = True
+            rows.append(row)
+
+        if min_growth is not None:
+            # Wachstums-Mandat: geprüfte Kandidaten zuerst, dann nach echtem Wachstum absteigend.
+            rows.sort(key=lambda r: (not r.get("revenue_growth_unchecked", False),
+                                     r["revenue_growth_pct"] if r["revenue_growth_pct"] is not None else float("-inf")),
+                      reverse=True)
+        else:
+            rows.sort(key=lambda r: (r["market_cap_bn"] or 0), reverse=True)
 
         return json.dumps({
             "mandate": mandate,
@@ -434,21 +446,15 @@ class ToolExecutor:
             "source": source,
             "match_count": len(rows),
             "candidates": rows[:DEFAULT_MAX_CANDIDATES],
-            "hinweis": "market_cap_bn und revenue_growth_pct sind echte Fundamentaldaten, nach dem Screen erneut geprüft.",
+            "hinweis": ("market_cap_bn und revenue_growth_pct sind echte Fundamentaldaten, nach dem Screen "
+                        "erneut geprüft. Kandidaten mit revenue_growth_unchecked=true haben KEINEN "
+                        "verfügbaren Wachstumswert — als ungeprüft benennen, nicht behaupten."),
         }, ensure_ascii=False)
 
     async def _company_name(self, ticker: str) -> str:
         """Company name for the relevance filter (cached per run). Falls back to '' on failure."""
-        if ticker in self._name_cache:
-            return self._name_cache[ticker]
-        name = ""
-        try:
-            info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info)
-            name = info.get("shortName") or info.get("longName") or ""
-        except Exception:
-            name = ""
-        self._name_cache[ticker] = name
-        return name
+        info = await self._yf_info(ticker)
+        return info.get("shortName") or info.get("longName") or ""
 
     async def _judge_news(self, ticker: str, criterion: str) -> str:
         """NL-Urteil: aktuelle Schlagzeilen gegen ein Freitext-Kriterium (sektor-agnostisch, beleggebunden).

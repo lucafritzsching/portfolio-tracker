@@ -129,6 +129,57 @@ def test_judge_news_shape(monkeypatch):
     assert out["trace"]["n_evidence_cited"] == 1 and out["trace"]["source"] == "llm"
 
 
+def test_yf_info_fetched_once_per_run(monkeypatch):
+    """_get_fundamentals, _company_name und _enrich teilen sich EINEN yf.info-Abruf pro Ticker."""
+    calls = []
+
+    class _FakeTicker:
+        def __init__(self, ticker):
+            calls.append(ticker)
+            self.info = {"shortName": "Apple Inc", "marketCap": 3e12, "trailingPE": 30.0}
+
+    monkeypatch.setattr("agent.tools.yf.Ticker", _FakeTicker)
+
+    async def scenario():
+        ex = _ex()
+        await ex._get_fundamentals("AAPL")
+        await ex._company_name("AAPL")
+        await ex._enrich("AAPL")
+        return ex
+
+    _run(scenario())
+    assert calls == ["AAPL"]
+
+
+def test_screen_marks_unchecked_growth_and_ranks_by_growth(monkeypatch):
+    """Wachstums-Mandat: Kandidaten ohne Wachstumswert werden gekennzeichnet und ans Ende
+    sortiert; geprüfte Kandidaten sind nach echtem Wachstum absteigend geordnet."""
+    async def fake_parse(mandate):
+        return ParsedMandate(filters={"min_revenue_growth": 15}, nl_criterion="x", parsed_ok=True)
+
+    async def fake_screen(filters):
+        return ([ScreenCandidate("BIGCAP", "Big"), ScreenCandidate("FAST", "Fast"),
+                 ScreenCandidate("NOGROWTH", "Unknown")], "yfinance_screen")
+
+    async def fake_enrich(self, ticker):
+        data = {
+            "BIGCAP": (100e9, 0.20, 20.0, "Big"),      # größte Cap, 20 % Wachstum
+            "FAST": (2e9, 0.50, None, "Fast"),          # kleine Cap, 50 % Wachstum
+            "NOGROWTH": (50e9, None, None, "Unknown"),  # kein Wachstumswert
+        }
+        return data[ticker]
+
+    monkeypatch.setattr("agent.tools.parse_mandate", fake_parse)
+    monkeypatch.setattr("agent.tools.run_screen", fake_screen)
+    monkeypatch.setattr(ToolExecutor, "_enrich", fake_enrich)
+    out = json.loads(_run(_ex().execute("screen_by_strategy", {"mandate": "x"})))
+    tickers = [c["ticker"] for c in out["candidates"]]
+    assert tickers == ["FAST", "BIGCAP", "NOGROWTH"]   # Wachstum desc, ungeprüft zuletzt
+    by_ticker = {c["ticker"]: c for c in out["candidates"]}
+    assert by_ticker["NOGROWTH"].get("revenue_growth_unchecked") is True
+    assert "revenue_growth_unchecked" not in by_ticker["FAST"]
+
+
 def test_get_news_drops_off_topic_headlines(monkeypatch):
     """Finnhub's company-news feed can include market-wide/off-topic articles under a ticker
     (Uniswap/Roku under AAPL); _get_news keeps only headlines that mention the company."""
