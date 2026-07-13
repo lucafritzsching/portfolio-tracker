@@ -142,8 +142,13 @@ def calculate_technical_indicators(prices: list[dict]) -> TechnicalIndicators:
     )
 
 
-def run_arima_forecast(prices: list[dict]) -> ModelForecast:
-    """Run ARIMA(p,d,q) forecast on closing prices."""
+def run_arima_forecast(prices: list[dict], validate: bool = False) -> ModelForecast:
+    """Run ARIMA(p,d,q) forecast on closing prices.
+
+    ``validate=True`` hängt eine 30-Tage-Holdout-Validierung an (MAE gegen die naive
+    Random-Walk-Baseline „letzter Kurs"). Bewusst opt-in: der Backtest fittet ARIMA pro
+    Fenster via compute_ensemble — dort würde die Validierung die Laufzeit ~verdoppeln.
+    """
     if len(prices) < 60:
         return ModelForecast(
             method="ARIMA",
@@ -194,6 +199,22 @@ def run_arima_forecast(prices: list[dict]) -> ModelForecast:
             f"95%-Intervall +30T [{lo30:.2f}, {hi30:.2f}]; Konfidenz {confidence:.0%} "
             f"(Prognose-Bewegung vs. Intervallbreite)."
         )
+
+        if validate and len(close) >= 120:
+            # 30-Tage-Holdout: MAE der ARIMA-Prognose vs. naive Random-Walk-Baseline
+            # (Prognose = letzter Trainingskurs). Ehrlich berichten — auf Tagesschluss-
+            # kursen schlägt ARIMA die Baseline oft NICHT; das ist der erwartbare Befund.
+            try:
+                train, actual = close[:-30], close[-30:]
+                val_fc = ARIMA(train, order=(2, 1, 2)).fit().forecast(steps=30)
+                mae_arima = float(np.mean(np.abs(actual - val_fc)))
+                mae_naive = float(np.mean(np.abs(actual - train[-1])))
+                verdict = ("ARIMA schlägt die Baseline" if mae_arima < mae_naive
+                           else "Baseline nicht geschlagen")
+                details += (f" Validierung (30T-Holdout): MAE ARIMA {mae_arima:.2f} vs. "
+                            f"naive Random-Walk-Baseline {mae_naive:.2f} → {verdict}.")
+            except Exception:
+                pass  # Validierung darf die Prognose nie mitreißen
 
         return ModelForecast(
             method="ARIMA(2,1,2)",
@@ -250,32 +271,44 @@ def run_ml_signal(prices: list[dict]) -> ModelForecast:
         df["price_vs_sma50"] = (close - df["sma50"]) / df["sma50"]
 
         # Label aus der ZUKUNFT: 20-Tage-Vorwärtsrendite >3% → BUY=2, <-3% → SELL=0, sonst HOLD=1.
-        df["future_return"] = close.pct_change(20).shift(-20)
+        label_horizon = 20
+        df["future_return"] = close.pct_change(label_horizon).shift(-label_horizon)
         df["label"] = 1
         df.loc[df["future_return"] > 0.03, "label"] = 2
         df.loc[df["future_return"] < -0.03, "label"] = 0
 
         feature_cols = ["rsi", "macd", "volatility", "momentum", "price_vs_sma20", "price_vs_sma50"]
         feats = df[feature_cols].dropna()                 # alle Zeilen mit gültigen Features (inkl. HEUTE)
-        labeled = df[feature_cols + ["label"]].dropna()   # nur Zeilen mit Features UND Label → Training
+        # Nur Zeilen mit Features UND bekannter Zukunftsrendite → Training. Ohne den
+        # future_return-Dropna bekämen die letzten 20 Zeilen (Zukunft unbekannt) still das
+        # Default-Label HOLD und würden falsch gelabelt mittrainiert/evaluiert.
+        labeled = df[feature_cols + ["label", "future_return"]].dropna()
         if len(labeled) < 60 or feats.empty:
             raise ValueError("Zu wenige saubere Datenpunkte")
 
         X_all = labeled[feature_cols].values
         y_all = labeled["label"].values
 
-        # Ehrliche Out-of-Sample-Genauigkeit: zeitgeordneter Holdout (letzte 20 % als Test).
+        # Ehrliche Out-of-Sample-Genauigkeit: zeitgeordneter Holdout (letzte 20 % als Test) mit
+        # purged Gap in Label-Horizont-Länge: die 20-Tage-Vorwärtslabels der letzten Trainings-
+        # zeilen überlappen sonst ins Testfenster (Leakage). Baseline = Mehrheitsklasse des Trainings.
         split = int(len(X_all) * 0.8)
         test_acc = None
-        if len(X_all) - split >= 5:
-            sc_eval = StandardScaler().fit(X_all[:split])
-            clf_eval = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
-            clf_eval.fit(sc_eval.transform(X_all[:split]), y_all[:split])
+        baseline_acc = None
+        if len(X_all) - split >= 5 and split - label_horizon >= 30:
+            X_tr, y_tr = X_all[: split - label_horizon], y_all[: split - label_horizon]
+            sc_eval = StandardScaler().fit(X_tr)
+            clf_eval = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1,
+                                              class_weight="balanced")
+            clf_eval.fit(sc_eval.transform(X_tr), y_tr)
             test_acc = float(accuracy_score(y_all[split:], clf_eval.predict(sc_eval.transform(X_all[split:]))))
+            majority = int(np.bincount(y_tr.astype(int)).argmax())
+            baseline_acc = float((y_all[split:] == majority).mean())
 
         # Finales Modell auf ALLEN gelabelten Daten; Vorhersage auf dem AKTUELLEN Bar (letzte Feature-Zeile).
         scaler = StandardScaler().fit(X_all)
-        clf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1,
+                                     class_weight="balanced")
         clf.fit(scaler.transform(X_all), y_all)
         X_pred = scaler.transform(feats.iloc[[-1]].values)
         pred = int(clf.predict(X_pred)[0])
@@ -283,9 +316,13 @@ def run_ml_signal(prices: list[dict]) -> ModelForecast:
         confidence = float(max(proba_by_class.values()))
         signal = {0: "SELL", 1: "HOLD", 2: "BUY"}[pred]
 
-        acc_txt = f", Holdout-Genauigkeit {test_acc:.0%}" if test_acc is not None else ""
+        acc_txt = ""
+        if test_acc is not None:
+            acc_txt = (f", Holdout-Genauigkeit {test_acc:.0%} (zeitgeordnet, purged mit "
+                       f"{label_horizon}T Gap) vs. Mehrheitsklassen-Baseline {baseline_acc:.0%}")
         details = (
-            f"Random Forest (100 Bäume, {len(X_all)} gelabelte Punkte, Vorhersage auf aktuellem Bar): "
+            f"Random Forest (100 Bäume, class_weight=balanced, {len(X_all)} gelabelte Punkte, "
+            f"Vorhersage auf aktuellem Bar): "
             f"Signal={signal}, P(SELL)={proba_by_class.get(0, 0.0):.0%}, "
             f"P(HOLD)={proba_by_class.get(1, 0.0):.0%}, P(BUY)={proba_by_class.get(2, 0.0):.0%}{acc_txt}"
         )

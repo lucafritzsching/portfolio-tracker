@@ -133,7 +133,7 @@ async def quick_stats(ticker: str):
     prices = prices_to_dicts(rows)
     if not prices:
         return {"ticker": ticker, "error": "Keine Kursdaten verfügbar."}
-    arima = await asyncio.to_thread(run_arima_forecast, prices)
+    arima = await asyncio.to_thread(run_arima_forecast, prices, True)  # validate=True: MAE vs. Random-Walk
     ml = await asyncio.to_thread(run_ml_signal, prices)
     return {
         "ticker": ticker,

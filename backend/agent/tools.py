@@ -306,7 +306,7 @@ class ToolExecutor:
         if not prices:
             return json.dumps({"error": f"Keine Kursdaten für {ticker}"})
 
-        arima = run_arima_forecast(prices)
+        arima = run_arima_forecast(prices, validate=True)
         ml = run_ml_signal(prices)
 
         # Consensus signal
