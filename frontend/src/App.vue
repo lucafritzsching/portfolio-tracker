@@ -28,12 +28,16 @@ onMounted(async () => {
     <AppSidebar v-if="ui.sidebarOpen" @close="ui.sidebarOpen = false" />
 
     <main class="app-main">
-      <DashboardView v-if="ui.activeView === 'dashboard'" />
-      <PositionsView v-else-if="ui.activeView === 'positions'" />
-      <SavingsView v-else-if="ui.activeView === 'savings'" />
-      <NewsView v-else-if="ui.activeView === 'news'" />
-      <ChatView v-else-if="ui.activeView === 'chat'" />
-      <EvalView v-else-if="ui.activeView === 'eval'" />
+      <!-- KeepAlive caches the views so the KI-Agent keeps streaming + preserves its answer/trace
+           when you switch tabs mid-run (and come back). -->
+      <KeepAlive>
+        <DashboardView v-if="ui.activeView === 'dashboard'" />
+        <PositionsView v-else-if="ui.activeView === 'positions'" />
+        <SavingsView v-else-if="ui.activeView === 'savings'" />
+        <NewsView v-else-if="ui.activeView === 'news'" />
+        <ChatView v-else-if="ui.activeView === 'chat'" />
+        <EvalView v-else-if="ui.activeView === 'eval'" />
+      </KeepAlive>
     </main>
 
     <AddPositionModal v-if="ui.showAddModal" />
