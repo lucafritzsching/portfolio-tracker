@@ -49,19 +49,18 @@ Browser (Vue 3 SPA)  ──HTTP/SSE──►  FastAPI Backend  ──►  Postgr
 Data-Science-Pipeline (gewichtetes Ensemble). Das LLM **trifft die Entscheidung nicht**, sondern
 *begründet* sie nachvollziehbar. Details in [03-agent-design.md](03-agent-design.md).
 
-## Projektstand (Stand v2.0-baseline)
+## Projektstand (Stand Abschlusspräsentation, Juli 2026)
 
 - ✅ Backend (FastAPI) inkl. Portfolio-CRUD, Marktdaten-Services, Agent
-- ✅ Hybrid-Agent: deterministisches Ensemble + **Evidence-gesicherte** LLM-Erklärung
-- ✅ Frontend (Vue 3 + TypeScript), 7 Views (inkl. Chat + Eval), SSE-Anbindung
-- ✅ Eval: Metriken (`AnalysisMetric`), Ensemble-Backtest, Faithfulness-Rate
-- ✅ Anti-Halluzination: Evidence-Katalog + Satz-Gate ([09-release-v2.0-baseline.md](09-release-v2.0-baseline.md))
-- ✅ Git: `main` + `develop` + `feature/strategy-alt-a` / `alt-b`
+- ✅ **Ein routender Chat-Agent** (ADR-16/17): `GET /api/agent/ask`, Ollama-Tool-Loop (Temp 0), sichtbare 🔧-Trace
+- ✅ Chat-Tools: `screen_by_strategy`, `judge_news` (sektor-agnostisch + Clamp), `discover_news_movers`, `run_backtest`, `run_statistical_model`, Technicals/Fundamentals/News
+- ✅ **Baselines auf allen Ebenen** (ADR-18): RF vs. Mehrheitsklasse (purged Holdout), ARIMA vs. Random Walk, Backtest vs. Buy&Hold
+- ✅ Frontend (Vue 3 + TypeScript), Views inkl. Chat + Eval, SSE-Anbindung
+- ✅ Eval: 36 NL-Validierungsläufe (83 % Trefferquote, 0 Halluzinationen), Ensemble-Backtest
 - ✅ Docker-Compose (PostgreSQL + optionales Backend; Ollama läuft nativ auf dem Host)
-- ⏳ Strategie-Screener (Biotech/Bollinger vs. News-Narrativ) — in Feature-Branches
-- ⏳ Evidence-Gate für Chat/Portfolio/Rebalance — geplant
+- ℹ️ Die Alt-A-Pipeline (Evidence-Katalog + Satz-Gate, `analyze_stock_stream`) ist evaluiert und im Code erhalten, aber **nicht mehr ans UI angebunden** — der Chat-Pfad stützt sich auf Router-Prompt + deterministische Tools + Clamp
 
-**Neu in dieser Version?** → [09-release-v2.0-baseline.md](09-release-v2.0-baseline.md)
+**Änderungshistorie:** [09-release-v2.0-baseline.md](09-release-v2.0-baseline.md) (v2.0) · [07-entscheidungslog.md](07-entscheidungslog.md) (ADRs bis heute)
 
 ## Für KI-Agenten / Claude Code
 
